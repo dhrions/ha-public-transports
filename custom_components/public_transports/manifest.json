@@ -1,0 +1,11 @@
+{
+  "codeowners": ["dhrions"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/user/my_component/",
+  "domain": "public_transports",
+  "iot_class": "cloud_polling",
+  "name": "public_transports",
+  "requirements": ["requests==2.32.3"],
+  "version": "0.0.1"
+}
