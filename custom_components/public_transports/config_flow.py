@@ -86,9 +86,8 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def fetch_stop_names(self):
         """Fetch the stop names and stop codes for the selected transit company."""
         transit_info = TRANSIT_COMPANIES.get(self.transit_company, {})
-        stop_names = []
-        stop_codes = []
-
+        stop_names = {}
+        
         api_url = transit_info.get("api_url")
         endpoint = transit_info.get("endpoint")
 
@@ -112,7 +111,15 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             data = await response.json()
                             _LOGGER.debug(f"Response JSON: {data}")
                             stops = data.get("StopPointsDelivery", {}).get("AnnotatedStopPointRef", [])
-                            stop_names = [(stop.get("StopName"), stop.get("Extension", {}).get("StopCode")) for stop in stops]
+                            
+                            # Collect stop names and associated codes
+                            for stop in stops:
+                                stop_name = stop.get("StopName")
+                                stop_code = stop.get("Extension", {}).get("StopCode")
+                                if stop_name:
+                                    if stop_name not in stop_names:
+                                        stop_names[stop_name] = []
+                                    stop_names[stop_name].append(stop_code)
                         else:
                             _LOGGER.error(f"Failed to fetch stops: {response.status}")
             except aiohttp.ClientError as err:
@@ -122,7 +129,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         _LOGGER.debug(f"Fetched stop names and codes: {stop_names}")
 
-        return stop_names
+        # Convert stop_names dictionary to a sorted list of tuples (stop_name, [stop_codes])
+        sorted_stop_names = sorted(stop_names.items())
+        return sorted_stop_names
 
     async def async_step_get_stop(self, user_input=None):
         """Handle the step where the user inputs a stop name."""
@@ -130,10 +139,12 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self.stop_name = user_input.get("stop_name")
-            # Find the corresponding stop code
+            # Find the corresponding stop codes
             selected_stop = next((stop for stop in self.stop_names if stop[0] == self.stop_name), None)
             if selected_stop:
-                stop_code = selected_stop[1]
+                stop_name, stop_codes = selected_stop
+                # Use the first stop code for the entry
+                stop_code = stop_codes[0] if stop_codes else None
                 return self.async_create_entry(
                     title=f"{self.city} - {self.transit_company}",
                     data={
@@ -149,7 +160,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Simulate fetching stop names from an API or database
         self.stop_names = await self.fetch_stop_names()
-        stop_names_list = [name for name, code in self.stop_names]
+        stop_names_list = [name for name, codes in self.stop_names]
 
         if not stop_names_list:
             errors["stop_name"] = "Aucun arrêt de bus trouvé pour cette compagnie."
