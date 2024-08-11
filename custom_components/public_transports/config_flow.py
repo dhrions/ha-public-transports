@@ -27,12 +27,12 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.transit_companies = CITIES_DATA[self.city]
                 return await self.async_step_select_company()
             else:
-                errors["city"] = "city_not_found"
+                errors["city"] = "La ville indiquée n'est pas valide."
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({vol.Required("city"): str}),
-            description_placeholders={"city: Enter the name of your city (e.g. Paris)."},
+            description_placeholders={"city": "Entrez le nom de votre ville (ex. : Paris)."},
             errors=errors,
         )
 
@@ -40,7 +40,6 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the step where the user selects a transit company."""
         if user_input is not None:
             self.transit_company = user_input["transit_company"]
-            # Check if the selected company uses SIRI-lite and if it requires a token
             if self.transit_company in SIRI_API_URLS:
                 self.requires_token = SIRI_API_URLS[self.transit_company]["requires_token"]
                 if self.requires_token:
@@ -53,7 +52,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="select_company",
             data_schema=vol.Schema({vol.Required("transit_company"): vol.In(options)}),
-            description_placeholders={"city: Enter the name of the public transports company (e.g. RATP)."},
+            description_placeholders={"transit_company": "Choisissez la compagnie de transport."},
         )
 
     async def async_step_get_token(self, user_input=None):
@@ -65,7 +64,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="get_token",
             data_schema=vol.Schema({vol.Required("api_token"): str}),
-            description_placeholders={"city: Enter your secret token (e.g. a65d0a21-560c-43c7-a549-7a27e2413eef)."},            
+            description_placeholders={"api_token": "Entrez votre token API (ex. : a65d0a21-560c-43c7-a549-7a27e2413eef)."},            
         )
 
     async def async_step_get_stop(self, user_input=None):
@@ -85,7 +84,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="get_stop",
             data_schema=vol.Schema({vol.Required("stop_name"): str}),
-            description_placeholders={"stop_name: Enter the name of your stop"},  
+            description_placeholders={"stop_name": "Entrez le nom de l'arrêt de bus (ex. : Gare, Centre-ville)."},  
         )
 
     @staticmethod
