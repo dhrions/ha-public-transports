@@ -1,7 +1,13 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
+import aiohttp
+import asyncio
+import logging
 from .const import DOMAIN, CITIES_DATA, TRANSIT_COMPANIES
+
+# Créez un logger spécifique pour votre intégration
+_LOGGER = logging.getLogger(__name__)
 
 class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Public Transports."""
@@ -79,6 +85,8 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_get_stop(self, user_input=None):
         """Handle the step where the user inputs a stop name."""
+        errors = {}
+
         if user_input is not None:
             self.stop_name = user_input.get("stop_name")
             return self.async_create_entry(
@@ -90,15 +98,54 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "stop_name": self.stop_name
                 }
             )
-            
-        # options =
-        # il faut aller chercher la liste de tous les arrêts de transports de la compagnie de transports associés
+
+        # Simulate fetching stop names from an API or database
+        stop_names = await self.fetch_stop_names()
+
+        if not stop_names:
+            errors["stop_name"] = "Aucun arrêt de bus trouvé pour cette compagnie."
 
         return self.async_show_form(
             step_id="get_stop",
-            data_schema=vol.Schema({vol.Required("stop_name"): str}),
-            description_placeholders={"stop_name": "Entrez le nom de l'arrêt de bus (ex. : Gare, Centre-ville)."},  
+            data_schema=vol.Schema({vol.Required("stop_name"): vol.In(stop_names)}),
+            description_placeholders={"stop_name": "Choisissez un arrêt de bus."},
+            errors=errors,
         )
+        
+    async def fetch_stop_names(self):
+        """Fetch the stop names for the selected transit company."""
+        transit_info = TRANSIT_COMPANIES.get(self.transit_company, {})
+        stop_names = []
+
+        # Vérifier si la compagnie a un endpoint pour récupérer les arrêts
+        api_url = transit_info.get("api_url")
+        endpoint = transit_info.get("endpoint")
+
+        if api_url and endpoint:
+            url = f"{api_url}{endpoint}"
+            headers = {}
+            
+            # Ajouter le token API si nécessaire
+            if self.requires_token and self.api_token:
+                headers["Authorization"] = f"Bearer {self.api_token}"
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            # Suppose que les noms des arrêts sont dans une liste sous la clé 'stops'
+                            stop_names = [stop["name"] for stop in data.get("stops", [])]
+                        else:
+                            _LOGGER.error(f"Failed to fetch stops: {response.status}")
+            except aiohttp.ClientError as err:
+                _LOGGER.error(f"HTTP error occurred: {err}")
+        else:
+            # Si pas d'endpoint, retourner une liste vide ou des arrêts par défaut
+            _LOGGER.warning("No stop list endpoint found for this company.")
+            stop_names = []
+
+        return stop_names
 
     @staticmethod
     @callback

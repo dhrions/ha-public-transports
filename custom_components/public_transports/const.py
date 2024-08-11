@@ -16,6 +16,7 @@ TRANSIT_COMPANIES = {
     "CTS": {
         "protocol": "SIRI-lite",
         "api_url": "https://api.cts-strasbourg.eu/v1/siri/2.0",
+        "endpoint" : "/stoppoints-discovery",
         "requires_token": True
     },
     # Ajoutez ici d'autres entreprises avec leurs protocoles
