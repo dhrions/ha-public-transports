@@ -90,14 +90,24 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         api_url = transit_info.get("api_url")
         endpoint = transit_info.get("endpoint")
+        auth_type = transit_info.get("auth_type")
 
         if api_url and endpoint:
             url = f"{api_url}{endpoint}"
             headers = {}
             auth = None
             
-            if self.requires_token and self.api_token:
-                auth = aiohttp.BasicAuth(self.api_token, password='')
+            # Configurer l'authentification en fonction du type
+            if auth_type == "Basic Auth":
+                if self.requires_token and self.api_token:
+                    auth = aiohttp.BasicAuth(self.api_token, password='')
+            elif auth_type == "Bearer Token":
+                if self.requires_token and self.api_token:
+                    headers["Authorization"] = f"Bearer {self.api_token}"
+            elif auth_type == "None":
+                pass
+            else:
+                _LOGGER.error(f"Unknown auth_type: {auth_type}")
 
             _LOGGER.debug(f"Making API request to: {url}")
             _LOGGER.debug(f"Headers: {headers}")
