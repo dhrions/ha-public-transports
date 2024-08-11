@@ -90,6 +90,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "stop_name": self.stop_name
                 }
             )
+            
+        # options =
+        # il faut aller chercher la liste de tous les arrêts de transports de la compagnie de transports associés
 
         return self.async_show_form(
             step_id="get_stop",
