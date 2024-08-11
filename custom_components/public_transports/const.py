@@ -7,13 +7,13 @@ CITIES_DATA = {
     "Marseille": ["RTM"],
     "Nice": ["Lignes d'Azur"],
     "Bordeaux": ["TBM"],
-    "Strasbourg": ["CTS"],
-    "Schiltigheim": ["CTS"]
+    "Strasbourg": ["Compagnie des Transports Strasbourgeois"],
+    "Schiltigheim": ["Compagnie des Transports Strasbourgeois"]
 }
 
 # Configuration des compagnies de transport
 TRANSIT_COMPANIES = {
-    "CTS": {
+    "Compagnie des Transports Strasbourgeois": {
         "protocol": "SIRI-lite",
         "api_url": "https://api.cts-strasbourg.eu/v1/siri/2.0",
         "endpoint" : "/stoppoints-discovery",
