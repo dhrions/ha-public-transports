@@ -113,9 +113,10 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         
     async def fetch_stop_names(self):
-        """Fetch the stop names for the selected transit company."""
+        """Fetch the stop names and stop codes for the selected transit company."""
         transit_info = TRANSIT_COMPANIES.get(self.transit_company, {})
         stop_names = []
+        stop_codes = []
 
         # Vérifier si la compagnie a un endpoint pour récupérer les arrêts
         api_url = transit_info.get("api_url")
@@ -124,18 +125,30 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if api_url and endpoint:
             url = f"{api_url}{endpoint}"
             headers = {}
+            auth = None
             
-            # Ajouter le token API si nécessaire
+            # Ajouter l'authentification Basic Auth si nécessaire
             if self.requires_token and self.api_token:
-                headers["Authorization"] = f"Bearer {self.api_token}"
+                auth = aiohttp.BasicAuth(self.api_token, password='')
+
+            # Log pour afficher l'URL de l'appel API et les en-têtes utilisés
+            _LOGGER.debug(f"Making API request to: {url}")
+            _LOGGER.debug(f"Headers: {headers}")
+            _LOGGER.debug(f"Auth: {auth}")
 
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(url, headers=headers) as response:
+                    async with session.get(url, headers=headers, auth=auth) as response:
+                        # Log pour afficher le statut de la réponse
+                        _LOGGER.debug(f"Received response with status: {response.status}")
                         if response.status == 200:
                             data = await response.json()
-                            # Suppose que les noms des arrêts sont dans une liste sous la clé 'stops'
-                            stop_names = [stop["name"] for stop in data.get("stops", [])]
+                            _LOGGER.debug(f"Response JSON: {data}")
+                            # Récupérer les arrêts et les codes d'arrêt
+                            stops = data.get("StopPointsDelivery", {}).get("AnnotatedStopPointRef", [])
+                            for stop in stops:
+                                stop_names.append(stop.get("StopName"))
+                                stop_codes.append(stop.get("Extension", {}).get("StopCode"))
                         else:
                             _LOGGER.error(f"Failed to fetch stops: {response.status}")
             except aiohttp.ClientError as err:
@@ -144,8 +157,13 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Si pas d'endpoint, retourner une liste vide ou des arrêts par défaut
             _LOGGER.warning("No stop list endpoint found for this company.")
             stop_names = []
+            stop_codes = []
 
-        return stop_names
+        # Log pour afficher les arrêts récupérés
+        _LOGGER.debug(f"Fetched stop names: {stop_names}")
+        _LOGGER.debug(f"Fetched stop codes: {stop_codes}")
+
+        return stop_names, stop_codes
 
     @staticmethod
     @callback
