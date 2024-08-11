@@ -11,11 +11,23 @@ CITIES_DATA = {
     "Schiltigheim": ["CTS"]
 }
 
-# URL des API SIRI-lite pour chaque société de transport et besoin en token
-SIRI_API_URLS = {
+# Configuration des compagnies de transport
+TRANSIT_COMPANIES = {
     "CTS": {
-        "url": "https://api.cts-strasbourg.eu/v1/siri/2.0",
+        "protocol": "SIRI-lite",
+        "api_url": "https://api.cts-strasbourg.eu/v1/siri/2.0",
         "requires_token": True
     },
-    # Ajoutez ici d'autres entreprises si nécessaire
+    # Ajoutez ici d'autres entreprises avec leurs protocoles
+    # Par exemple :
+    # "RATP": {
+    #     "protocol": "SIRI-lite",
+    #     "api_url": "https://api.ratp.fr/siri/2.0",
+    #     "requires_token": True
+    # },
+    # "TCL": {
+    #     "protocol": "GTRS-RT",
+    #     "api_url": None,
+    #     "requires_token": False
+    # }
 }
