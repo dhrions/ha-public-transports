@@ -83,42 +83,12 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"api_token": "Entrez votre token API (ex. : a65d0a21-560c-43c7-a549-7a27e2413eef)."},            
         )
 
-    async def async_step_get_stop(self, user_input=None):
-        """Handle the step where the user inputs a stop name."""
-        errors = {}
-
-        if user_input is not None:
-            self.stop_name = user_input.get("stop_name")
-            return self.async_create_entry(
-                title=f"{self.city} - {self.transit_company}",
-                data={
-                    "city": self.city,
-                    "transit_company": self.transit_company,
-                    "api_token": self.api_token,
-                    "stop_name": self.stop_name
-                }
-            )
-
-        # Simulate fetching stop names from an API or database
-        stop_names = await self.fetch_stop_names()
-
-        if not stop_names:
-            errors["stop_name"] = "Aucun arrêt de bus trouvé pour cette compagnie."
-
-        return self.async_show_form(
-            step_id="get_stop",
-            data_schema=vol.Schema({vol.Required("stop_name"): vol.In(stop_names)}),
-            description_placeholders={"stop_name": "Choisissez un arrêt de bus."},
-            errors=errors,
-        )
-        
     async def fetch_stop_names(self):
         """Fetch the stop names and stop codes for the selected transit company."""
         transit_info = TRANSIT_COMPANIES.get(self.transit_company, {})
         stop_names = []
         stop_codes = []
 
-        # Vérifier si la compagnie a un endpoint pour récupérer les arrêts
         api_url = transit_info.get("api_url")
         endpoint = transit_info.get("endpoint")
 
@@ -127,11 +97,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             headers = {}
             auth = None
             
-            # Ajouter l'authentification Basic Auth si nécessaire
             if self.requires_token and self.api_token:
                 auth = aiohttp.BasicAuth(self.api_token, password='')
 
-            # Log pour afficher l'URL de l'appel API et les en-têtes utilisés
             _LOGGER.debug(f"Making API request to: {url}")
             _LOGGER.debug(f"Headers: {headers}")
             _LOGGER.debug(f"Auth: {auth}")
@@ -139,31 +107,59 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, headers=headers, auth=auth) as response:
-                        # Log pour afficher le statut de la réponse
                         _LOGGER.debug(f"Received response with status: {response.status}")
                         if response.status == 200:
                             data = await response.json()
                             _LOGGER.debug(f"Response JSON: {data}")
-                            # Récupérer les arrêts et les codes d'arrêt
                             stops = data.get("StopPointsDelivery", {}).get("AnnotatedStopPointRef", [])
-                            for stop in stops:
-                                stop_names.append(stop.get("StopName"))
-                                stop_codes.append(stop.get("Extension", {}).get("StopCode"))
+                            stop_names = [(stop.get("StopName"), stop.get("Extension", {}).get("StopCode")) for stop in stops]
                         else:
                             _LOGGER.error(f"Failed to fetch stops: {response.status}")
             except aiohttp.ClientError as err:
                 _LOGGER.error(f"HTTP error occurred: {err}")
         else:
-            # Si pas d'endpoint, retourner une liste vide ou des arrêts par défaut
             _LOGGER.warning("No stop list endpoint found for this company.")
-            stop_names = []
-            stop_codes = []
+        
+        _LOGGER.debug(f"Fetched stop names and codes: {stop_names}")
 
-        # Log pour afficher les arrêts récupérés
-        _LOGGER.debug(f"Fetched stop names: {stop_names}")
-        _LOGGER.debug(f"Fetched stop codes: {stop_codes}")
+        return stop_names
 
-        return stop_names, stop_codes
+    async def async_step_get_stop(self, user_input=None):
+        """Handle the step where the user inputs a stop name."""
+        errors = {}
+
+        if user_input is not None:
+            self.stop_name = user_input.get("stop_name")
+            # Find the corresponding stop code
+            selected_stop = next((stop for stop in self.stop_names if stop[0] == self.stop_name), None)
+            if selected_stop:
+                stop_code = selected_stop[1]
+                return self.async_create_entry(
+                    title=f"{self.city} - {self.transit_company}",
+                    data={
+                        "city": self.city,
+                        "transit_company": self.transit_company,
+                        "api_token": self.api_token,
+                        "stop_name": self.stop_name,
+                        "stop_code": stop_code
+                    }
+                )
+            else:
+                errors["stop_name"] = "L'arrêt sélectionné est invalide."
+
+        # Simulate fetching stop names from an API or database
+        self.stop_names = await self.fetch_stop_names()
+        stop_names_list = [name for name, code in self.stop_names]
+
+        if not stop_names_list:
+            errors["stop_name"] = "Aucun arrêt de bus trouvé pour cette compagnie."
+
+        return self.async_show_form(
+            step_id="get_stop",
+            data_schema=vol.Schema({vol.Required("stop_name"): vol.In(stop_names_list)}),
+            description_placeholders={"stop_name": "Choisissez un arrêt de bus."},
+            errors=errors,
+        )
 
     @staticmethod
     @callback
