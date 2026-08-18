@@ -1,4 +1,8 @@
+from datetime import timedelta
+
 DOMAIN = "public_transports"
+
+DEFAULT_SCAN_INTERVAL = timedelta(seconds=60)
 
 # Données des villes et entreprises de transport
 CITIES_DATA = {
@@ -17,6 +21,7 @@ TRANSIT_COMPANIES = {
         "protocol": "SIRI-lite",
         "api_url": "https://api.cts-strasbourg.eu/v1/siri/2.0",
         "endpoint" : "/stoppoints-discovery",
+        "stop_monitoring_endpoint": "/stop-monitoring?MonitoringRef=",
         "auth_type" : "Basic Auth",
         "requires_token": True
     },
