@@ -56,18 +56,50 @@ Deux options non négociables :
 
 ## Redémarrer Home Assistant après déploiement
 
-Ne fonctionne **qu'en session SSH interactive** (cf. § ci-dessus) :
+Trois façons, par ordre de préférence :
+
+1. **API REST + jeton** (cf. section suivante) — scriptable, pas de SSH.
+2. **Session SSH interactive** (cf. § ci-dessus — ne fonctionne pas en non-interactif) :
+   ```bash
+   ssh hassio@192.168.1.14   # session interactive
+   ha core restart           # tapé dans la session, jamais passé en argument à ssh
+   ```
+3. **UI HA** → *Paramètres → Système → Redémarrer*.
+
+## Inspecter l'état et redémarrer sans SSH : API REST + jeton longue durée
+
+L'API REST de Home Assistant Core s'authentifie par jeton et n'a **pas** la restriction
+SSH ci-dessus (elle ne passe pas par le canal Supervisor). Elle permet de lire
+l'état/attributs d'une entité et de redémarrer Core, entièrement scriptable.
+
+Mise en place (une fois) : profil HA → *Sécurité* → *Jetons d'accès longue durée* →
+*Créer un jeton*. À stocker hors du dépôt (fichier scratchpad de session, jamais
+committé) — c'est un accès équivalent à un admin HA.
 
 ```bash
-ssh hassio@192.168.1.14   # session interactive
-ha core restart           # tapé dans la session, jamais passé en argument à ssh
+TOKEN="<jeton>"
+
+# Lire l'état/attributs d'une entité — utile pour vérifier un fix sans capture d'écran
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://192.168.1.14:8123/api/states/sensor.gaite_prochain_passage
+
+# Redémarrer Core (curl se termine en erreur — la connexion est coupée par le
+# redémarrage lui-même — mais l'action a bien lieu ; revérifier avec un GET /api/
+# qui redevient 401/200 une fois Core reparti)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  http://192.168.1.14:8123/api/services/homeassistant/restart
 ```
 
-Alternative sans SSH : UI HA → *Paramètres → Système → Redémarrer*.
+Limite : `GET /api/error_log` renvoie `404` sur cette instance (cohérent avec l'absence
+d'un `home-assistant.log` courant sur le disque, cf. section suivante) — l'API ne
+contourne pas ce problème précis, seule la session SSH interactive donne accès à une
+vraie trace d'erreur.
 
 ## Récupérer les logs pour débugger
 
-Depuis la session SSH interactive :
+Depuis la session SSH interactive (l'API `/api/error_log` échoue en `404`, cf.
+ci-dessus) :
 
 ```bash
 ha core logs | grep -A60 "Traceback"
