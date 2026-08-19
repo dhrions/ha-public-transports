@@ -19,13 +19,16 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def scalar(value):
-    """Normalize a SIRI field that may be a bare string or a {"value": ...} dict.
+    """Normalize a SIRI field that may be a bare string, a {"value": ...} dict, or a
+    list of either (observed: DestinationName as [{"value": "..."}]) into a plain string.
 
     Some producers (observed on IDFM/PRIM stop-monitoring responses, unlike CTS) wrap
-    scalar fields like LineRef/DestinationName as {"value": "..."} instead of a plain
-    string. siri-lite's MonitoredCall exposes whatever shape the API returned, so any
-    code comparing/hashing these fields (filtering, building option lists) needs this.
+    scalar fields like LineRef/DestinationName this way instead of a plain string.
+    siri-lite's MonitoredCall exposes whatever shape the API returned, so any code
+    comparing/hashing these fields (filtering, building option lists, display) needs this.
     """
+    if isinstance(value, list):
+        value = value[0] if value else None
     if isinstance(value, dict):
         return value.get("value")
     return value
