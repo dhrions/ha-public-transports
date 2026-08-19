@@ -6,6 +6,6 @@
   "domain": "public_transports",
   "iot_class": "cloud_polling",
   "name": "Public Transports",
-  "requirements": ["requests>=2.32", "siri-lite>=0.6.0"],
-  "version": "0.3.0"
+  "requirements": ["requests>=2.32", "siri-lite>=0.10.0"],
+  "version": "0.4.0"
 }

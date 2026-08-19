@@ -15,6 +15,21 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the public_transports component."""
     return True
 
+
+async def async_migrate_entry(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
+    """Migrate old config entries.
+
+    v1 → v2 : le filtre de sens portait un terminus (DestinationName) ; il porte
+    désormais un DirectionRef (Aller/Retour). L'ancienne valeur est incompatible avec le
+    nouveau filtrage — on l'efface (retour à « tous les sens ») plutôt que de risquer un
+    capteur vide. L'utilisateur re-choisit son sens via les options si besoin.
+    """
+    if entry.version < 2:
+        data = {k: v for k, v in entry.data.items() if k not in ("direction_filter", "direction_label")}
+        options = {k: v for k, v in entry.options.items() if k not in ("direction_filter", "direction_label")}
+        hass.config_entries.async_update_entry(entry, data=data, options=options, version=2)
+    return True
+
 async def _async_update_listener(
     hass: HomeAssistant, entry: config_entries.ConfigEntry
 ) -> None:

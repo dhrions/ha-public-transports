@@ -41,7 +41,10 @@ L'assistant de configuration guide en plusieurs étapes :
 5. **Ligne** *(facultatif)* — pour ne suivre qu'une ligne précise à cet arrêt, ou
    « Toutes les lignes ». Les lignes proposées sont celles qui circulent au moment de la
    configuration (sondage temps réel de l'API).
-6. **Sens** *(facultatif)* — pour ne suivre qu'un sens (terminus), ou « Tous les sens ».
+6. **Sens** *(facultatif)* — pour ne suivre qu'un sens de circulation (les 2 sens réels de
+   la ligne, ex. « Châtillon Montrouge » vs « Asnières… / Saint-Denis… »), ou « Tous les
+   sens ». Le sens est déterminé par le `DirectionRef` SIRI, pas par le terminus : une
+   ligne fourchue (ex. métro 13) a plusieurs terminus pour un même sens, tous regroupés.
 
 Le filtre ligne/sens est **modifiable après coup** sans supprimer l'arrêt : *Paramètres →
 Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*.
@@ -57,8 +60,12 @@ Chaque arrêt configuré crée un capteur `sensor.<nom_arrêt>_prochain_passage`
 | État | Temps restant avant le prochain passage, en minutes |
 | `line` | Référence de la ligne |
 | `published_line_name` | Nom publié de la ligne |
-| `destination` | Destination du véhicule (prochain passage) |
-| `next_passages` | Liste de tous les passages retournés : `{time, line, destination}` chacun — utile pour distinguer les sens quand l'arrêt dessert plusieurs lignes/directions (ex. un `StopArea` PRIM) |
+| `destination` | Terminus du véhicule (prochain passage) |
+| `next_passages` | Liste de tous les passages retournés : `{time, line, destination}` chacun — le terminus par passage y reste visible même quand le capteur est filtré sur un sens |
+
+Quand un filtre ligne et/ou sens est appliqué, le **nom du capteur** le reflète (ex.
+`Gaîté 13 → Châtillon Montrouge - prochain passage`), et l'état/la liste ne comptent que
+les passages du sens choisi. Le terminus précis de chaque rame reste dans `next_passages`.
 
 Quand un filtre ligne et/ou sens est appliqué, le **nom du capteur** le reflète directement
 (ex. `Gaîté 13 → Châtillon Montrouge - prochain passage`), et l'état ne compte que les

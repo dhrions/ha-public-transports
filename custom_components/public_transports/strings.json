@@ -52,17 +52,16 @@
       },
       "select_direction": {
         "title": "Sens (facultatif)",
-        "description": "Choisissez un sens (terminus) pour ne suivre que celui-ci, ou « Tous les sens » pour tout suivre.",
+        "description": "Choisissez un sens de circulation pour ne suivre que celui-ci, ou « Tous les sens » pour tout suivre.",
         "data": {
           "direction": "Sens"
         }
       },
       "filters_manual": {
-        "title": "Filtre ligne / sens (facultatif)",
-        "description": "Aucun passage ne circule actuellement à cet arrêt : la liste n'a pas pu être proposée. Laissez vide pour tout suivre, ou saisissez à la main une ligne (ex. : 13) et/ou un sens (terminus, ex. : Châtillon Montrouge).",
+        "title": "Filtre ligne (facultatif)",
+        "description": "Aucun passage ne circule actuellement à cet arrêt : la liste n'a pas pu être proposée. Laissez vide pour tout suivre, ou saisissez à la main une ligne (ex. : 13). Le sens se choisira via les options une fois des passages visibles.",
         "data": {
-          "line": "Ligne",
-          "direction": "Sens (terminus)"
+          "line": "Ligne"
         }
       }
     },

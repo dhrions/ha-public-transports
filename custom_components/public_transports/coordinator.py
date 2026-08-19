@@ -82,15 +82,14 @@ class PublicTransportsDataUpdateCoordinator(DataUpdateCoordinator[list[Monitored
 
         The line filter matches against either line_ref (value chosen from the dropdown)
         or published_line_name (value typed in the manual fallback). The direction filter
-        is a case-insensitive substring of the destination name, so both an exact terminus
-        picked from the list and a hand-typed fragment work.
+        matches the SIRI DirectionRef (Aller/Retour) exactly — the real 2-way sense, as
+        opposed to the per-vehicle terminus (which a forked line like metro 13 multiplies).
         """
         if self.line_filter:
             if self.line_filter not in (scalar(call.line_ref), scalar(call.published_line_name)):
                 return False
         if self.direction_filter:
-            destination = (scalar(call.destination_name) or "").casefold()
-            if self.direction_filter.casefold() not in destination:
+            if scalar(call.direction_ref) != self.direction_filter:
                 return False
         return True
 

@@ -50,7 +50,7 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         config = {**entry.data, **entry.options}
         name = config["stop_name"]
         line_name = config.get("line_name")
-        direction = config.get("direction_filter")
+        direction = config.get("direction_label")
         if line_name:
             name += f" {line_name}"
         if direction:

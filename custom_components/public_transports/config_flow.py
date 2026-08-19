@@ -51,12 +51,28 @@ def _lines_from_calls(calls):
 
 
 def _directions_from_calls(calls, line_ref=None):
-    """Distinct destination names, optionally restricted to one line."""
-    return sorted({
-        scalar(call.destination_name)
-        for call in calls
-        if scalar(call.destination_name) and (not line_ref or scalar(call.line_ref) == line_ref)
-    })
+    """Group passages by real sense (SIRI DirectionRef), optionally within one line.
+
+    Returns {direction_ref: label} where label is composed from the distinct terminuses
+    seen for that sense (ex. "Asnières… / Saint-Denis…" vs "Châtillon Montrouge"). This is
+    the 2-way sense the user picks — the per-vehicle terminus stays for the sensor display.
+    A forked line (ex. metro 13) has several terminuses per sense, hence the join.
+    """
+    senses = {}
+    for call in calls:
+        if line_ref and scalar(call.line_ref) != line_ref:
+            continue
+        direction_ref = scalar(call.direction_ref)
+        if not direction_ref:
+            continue
+        terminus = scalar(call.destination_name)
+        bucket = senses.setdefault(direction_ref, [])
+        if terminus and terminus not in bucket:
+            bucket.append(terminus)
+    return {
+        direction_ref: " / ".join(sorted(terminuses)) or direction_ref
+        for direction_ref, terminuses in senses.items()
+    }
 
 
 async def resolve_line_label(hass, line_ref):
@@ -104,7 +120,7 @@ async def resolve_line_names(hass, lines):
 class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Public Transports."""
 
-    VERSION = 1
+    VERSION = 2
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     def __init__(self):
@@ -115,12 +131,15 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.api_token = None
         self.stop_name = None
         self.stop_code = None
+        self.candidate_codes = []
         self.transit_companies = []
         self.zone_matches = []
         self.available_calls = []
+        self.candidate_calls = []
         self.line_filter = None
         self.line_name = None
         self.direction_filter = None
+        self.direction_label = None
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step where the user inputs a city name."""
@@ -250,28 +269,31 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors = {}
 
-        if user_input is not None:
-            self.stop_name = user_input.get("stop_name")
-            # Find the corresponding stop codes
-            selected_stop = next((stop for stop in self.stop_names if stop[0] == self.stop_name), None)
-            if selected_stop:
-                _, stop_codes = selected_stop
-                # Use the first stop code for the entry
-                self.stop_code = stop_codes[0] if stop_codes else None
-                return await self.async_step_filters()
-            else:
-                errors["stop_name"] = "invalid_stop"
-
-        # Simulate fetching stop names from an API or database
+        # Une clé par (nom, code) plutôt que par nom seul : un même nom recouvre souvent
+        # plusieurs codes CTS distincts, un par sens/quai (ex. "Barr" -> 43A ET 43B). Ne
+        # garder que le premier code écraserait silencieusement le second sens.
         self.stop_names = await self.fetch_stop_names()
-        stop_names_list = [name for name, codes in self.stop_names]
+        stop_options = {}
+        for name, codes in self.stop_names:
+            for code in codes:
+                label = name if len(codes) == 1 else f"{name} ({code})"
+                stop_options[f"{name}||{code}"] = label
 
-        if not stop_names_list:
+        if user_input is not None:
+            choice = user_input.get("stop_name")
+            if choice in stop_options:
+                _, code = choice.split("||", 1)
+                self.stop_name = stop_options[choice]
+                self.stop_code = code
+                return await self.async_step_filters()
+            errors["stop_name"] = "invalid_stop"
+
+        if not stop_options:
             errors["stop_name"] = "no_stops_found"
 
         return self.async_show_form(
             step_id="get_stop",
-            data_schema=vol.Schema({vol.Required("stop_name"): vol.In(stop_names_list)}),
+            data_schema=vol.Schema({vol.Required("stop_name"): vol.In(stop_options)}),
             errors=errors,
         )
 
@@ -385,13 +407,26 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_select_direction(self, user_input=None):
-        """Let the user optionally restrict the stop to a single direction (terminus)."""
-        directions = _directions_from_calls(self.available_calls, self.line_filter)
-        options = {ALL_DIRECTIONS: "Tous les sens", **{d: d for d in directions}}
+        """Let the user optionally restrict the stop to a single sense (DirectionRef)."""
+        senses = _directions_from_calls(self.available_calls, self.line_filter)
+
+        # Si l'API n'expose pas de sens exploitable (ex. CTS peut ne pas fournir
+        # DirectionRef), n'imposer aucune étape : on suit tous les sens.
+        if not senses:
+            self.direction_filter = None
+            self.direction_label = None
+            return self._create_entry()
+
+        options = {ALL_DIRECTIONS: "Tous les sens", **senses}
 
         if user_input is not None:
             choice = user_input.get("direction")
-            self.direction_filter = None if not choice or choice == ALL_DIRECTIONS else choice
+            if choice and choice != ALL_DIRECTIONS:
+                self.direction_filter = choice
+                self.direction_label = senses.get(choice)
+            else:
+                self.direction_filter = None
+                self.direction_label = None
             return self._create_entry()
 
         return self.async_show_form(
@@ -400,20 +435,23 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_filters_manual(self, user_input=None):
-        """Fallback when nothing is circulating: type an optional line/direction."""
+        """Fallback when nothing is circulating: type an optional line.
+
+        Le sens (DirectionRef = Aller/Retour) n'est pas saisissable utilement à la main —
+        il se choisira via Options une fois des passages visibles.
+        """
         if user_input is not None:
             line = (user_input.get("line") or "").strip()
-            direction = (user_input.get("direction") or "").strip()
             self.line_filter = line or None
             self.line_name = line or None
-            self.direction_filter = direction or None
+            self.direction_filter = None
+            self.direction_label = None
             return self._create_entry()
 
         return self.async_show_form(
             step_id="filters_manual",
             data_schema=vol.Schema({
                 vol.Optional("line", default=""): str,
-                vol.Optional("direction", default=""): str,
             }),
         )
 
@@ -430,6 +468,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "line_filter": self.line_filter,
                 "line_name": self.line_name,
                 "direction_filter": self.direction_filter,
+                "direction_label": self.direction_label,
             },
         )
 
@@ -456,8 +495,9 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
             self.hass, data["transit_company"], data.get("api_token"), data["stop_code"]
         )
         lines = await resolve_line_names(self.hass, _lines_from_calls(calls))
+        senses = _directions_from_calls(calls, current.get("line_filter"))
         line_options = {ALL_LINES: "Toutes les lignes", **lines}
-        dir_options = {ALL_DIRECTIONS: "Tous les sens", **{d: d for d in _directions_from_calls(calls)}}
+        dir_options = {ALL_DIRECTIONS: "Tous les sens", **senses}
 
         # Toujours proposer le filtre courant, même si cette ligne/ce sens ne circule pas
         # au moment du re-sondage (sinon vol.In rejetterait la valeur par défaut).
@@ -466,7 +506,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         if cur_line != ALL_LINES and cur_line not in line_options:
             line_options[cur_line] = current.get("line_name") or cur_line
         if cur_dir != ALL_DIRECTIONS and cur_dir not in dir_options:
-            dir_options[cur_dir] = cur_dir
+            dir_options[cur_dir] = current.get("direction_label") or cur_dir
 
         if user_input is not None:
             line = user_input.get("line")
@@ -479,6 +519,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                     "line_filter": line_filter,
                     "line_name": line_options.get(line) if line_filter else None,
                     "direction_filter": direction_filter,
+                    "direction_label": dir_options.get(direction) if direction_filter else None,
                 },
             )
 
