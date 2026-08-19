@@ -1,10 +1,34 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+    SelectOptionDict,
+)
 import aiohttp
 import logging
 from .const import DOMAIN, CITIES_DATA, TRANSIT_COMPANIES, IDFM_ZONES_API_URL, IDFM_LINES_API_URL
-from .coordinator import build_siri_client, scalar
+from .coordinator import build_siri_client, entry_sense_specs, scalar
+
+
+def dropdown(options):
+    """Build a searchable dropdown selector from an {value: label} mapping.
+
+    Replaces vol.In(...) so long lists (cities, hundreds of CTS stops) get a search box
+    instead of a radio list. Labels are passed inline, sidestepping translation of dynamic
+    values (stop/line names).
+    """
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=[
+                SelectOptionDict(value=str(value), label=str(label))
+                for value, label in options.items()
+            ],
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
 
 # Créez un logger spécifique pour votre intégration
 _LOGGER = logging.getLogger(__name__)
@@ -12,6 +36,8 @@ _LOGGER = logging.getLogger(__name__)
 # Sentinelles « pas de filtre » pour les listes déroulantes ligne / sens.
 ALL_LINES = "__all__"
 ALL_DIRECTIONS = "__all__"
+# Sentinelle « les deux sens » : crée une entrée qui expose 2 capteurs (un par sens).
+BOTH_SENSES = "__both__"
 
 # Traduction des zdatype du référentiel IDFM zones-d-arrets, pour désambiguïser les
 # arrêts homonymes (ex. "Gaîté" = une station de métro et un arrêt de bus distincts).
@@ -120,7 +146,7 @@ async def resolve_line_names(hass, lines):
 class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Public Transports."""
 
-    VERSION = 2
+    VERSION = 3
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     def __init__(self):
@@ -140,6 +166,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.line_name = None
         self.direction_filter = None
         self.direction_label = None
+        self.senses = []
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step where the user inputs a city name."""
@@ -158,7 +185,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Required("city"): vol.In(available_cities)}),
+            data_schema=vol.Schema({
+                vol.Required("city"): dropdown({c: c for c in available_cities})
+            }),
         )
 
     async def async_step_select_company(self, user_input=None):
@@ -182,7 +211,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors = {"transit_company": "invalid_company"}
                 return self.async_show_form(
                     step_id="select_company",
-                    data_schema=vol.Schema({vol.Required("transit_company"): vol.In(self.transit_companies)}),
+                    data_schema=vol.Schema({vol.Required("transit_company"): dropdown({c: c for c in self.transit_companies})}),
                     errors=errors
                 )
 
@@ -190,11 +219,28 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="select_company",
-            data_schema=vol.Schema({vol.Required("transit_company"): vol.In(options)}),
+            data_schema=vol.Schema({vol.Required("transit_company"): dropdown(options)}),
         )
+
+    def _reused_token(self):
+        """Return an api_token already entered for the same company, if any.
+
+        Lets the flow skip the token step when the user adds another stop for a company
+        they already configured — "ne pas redemander le token".
+        """
+        for entry in self._async_current_entries():
+            if entry.data.get("transit_company") == self.transit_company and entry.data.get("api_token"):
+                return entry.data["api_token"]
+        return None
 
     async def async_step_get_token(self, user_input=None):
         """Handle the step where the user inputs an API token if required."""
+        if user_input is None:
+            reused = self._reused_token()
+            if reused:
+                self.api_token = reused
+                return await self.async_step_get_stop()
+
         if user_input is not None:
             self.api_token = user_input.get("api_token")
             return await self.async_step_get_stop()
@@ -296,7 +342,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="get_stop",
-            data_schema=vol.Schema({vol.Required("stop_name"): vol.In(stop_options)}),
+            data_schema=vol.Schema({vol.Required("stop_name"): dropdown(stop_options)}),
             errors=errors,
         )
 
@@ -377,7 +423,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="get_stop_select",
-            data_schema=vol.Schema({vol.Required("stop_id"): vol.In(options)}),
+            data_schema=vol.Schema({vol.Required("stop_id"): dropdown(options)}),
             errors=errors,
         )
 
@@ -431,7 +477,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="select_line",
-            data_schema=vol.Schema({vol.Required("line", default=ALL_LINES): vol.In(options)}),
+            data_schema=vol.Schema({vol.Required("line", default=ALL_LINES): dropdown(options)}),
         )
 
     def _codes_from_candidates(self):
@@ -456,64 +502,73 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options[code] = " / ".join(terminuses) if terminuses else code
         return options
 
+    def _spec(self, stop_code, direction_filter=None, direction_label=None):
+        """Build one sense spec (= one future sensor) from the current flow state."""
+        return {
+            "stop_code": stop_code,
+            "line_filter": self.line_filter,
+            "line_name": self.line_name,
+            "direction_filter": direction_filter,
+            "direction_label": direction_label,
+        }
+
     async def async_step_select_direction(self, user_input=None):
-        """Let the user pick a sense.
+        """Let the user pick a sense — one, or both (2 sensors).
 
-        Ambiguous CTS stop (several physical codes) : chaque code EST un sens — choix
-        obligatoire (pas de "tous les sens", un capteur ne suit qu'un seul MonitoringRef),
-        toujours proposé même sans trafic instantané sur l'un des deux (cf.
-        _codes_from_candidates). Le code choisi devient directement stop_code.
+        Ambiguous CTS stop (several physical codes) : chaque code EST un sens (un capteur
+        ne suit qu'un seul MonitoringRef), toujours proposé même sans trafic instantané sur
+        l'un des deux (cf. _codes_from_candidates). Un sens -> 1 spec sur ce code ; « les
+        deux sens » -> une spec par code.
 
-        Sinon (un seul code physique, ex. PRIM) : sens dérivés du DirectionRef des
-        passages en circulation, comme avant — c'est la seule source disponible ici.
+        Sinon (un seul code physique, ex. PRIM) : sens dérivés du DirectionRef des passages
+        en circulation. Un sens -> 1 spec avec ce direction_filter ; « tous les sens » ->
+        1 spec sans filtre (un seul capteur) ; « les deux sens » -> une spec par sens.
         """
         if len(self.candidate_codes) > 1:
-            options = self._codes_from_candidates()
+            codes = self._codes_from_candidates()
 
-            if len(options) <= 1:
-                code, label = next(iter(options.items())) if options else (sorted(self.candidate_codes)[0], None)
-                self.stop_code = code
-                self.direction_filter = None
-                self.direction_label = label
+            if len(codes) <= 1:
+                code, label = next(iter(codes.items())) if codes else (sorted(self.candidate_codes)[0], None)
+                self.senses = [self._spec(code, direction_label=label)]
                 return self._create_entry()
+
+            options = {**codes, BOTH_SENSES: "Les deux sens (2 capteurs)"}
 
             if user_input is not None:
                 choice = user_input.get("direction")
-                self.stop_code = choice
-                self.direction_filter = None
-                self.direction_label = options.get(choice)
+                if choice == BOTH_SENSES:
+                    self.senses = [self._spec(code, direction_label=label) for code, label in codes.items()]
+                else:
+                    self.senses = [self._spec(choice, direction_label=codes.get(choice))]
                 return self._create_entry()
 
             return self.async_show_form(
                 step_id="select_direction",
-                data_schema=vol.Schema({vol.Required("direction", default=next(iter(options))): vol.In(options)}),
+                data_schema=vol.Schema({vol.Required("direction", default=next(iter(codes))): dropdown(options)}),
             )
 
         senses = _directions_from_calls(self.available_calls, self.line_filter)
 
         if len(senses) <= 1:
-            if senses:
-                self.direction_filter, self.direction_label = next(iter(senses.items()))
-            else:
-                self.direction_filter = None
-                self.direction_label = None
+            direction_filter, direction_label = next(iter(senses.items())) if senses else (None, None)
+            self.senses = [self._spec(self.stop_code, direction_filter, direction_label)]
             return self._create_entry()
 
-        options = {ALL_DIRECTIONS: "Tous les sens", **senses}
+        # Pas de "tous les sens" séparé : ça reviendrait au même que "les deux sens" (tout
+        # suivre), juste avec un seul capteur fusionné au lieu de deux — redondant.
+        options = {**senses, BOTH_SENSES: "Les deux sens (2 capteurs)"}
 
         if user_input is not None:
             choice = user_input.get("direction")
-            if choice and choice != ALL_DIRECTIONS:
-                self.direction_filter = choice
-                self.direction_label = senses.get(choice)
+            if choice == BOTH_SENSES:
+                self.senses = [self._spec(self.stop_code, d, label) for d, label in senses.items()]
             else:
-                self.direction_filter = None
-                self.direction_label = None
+                self.senses = [self._spec(self.stop_code, choice, senses.get(choice))]
             return self._create_entry()
 
         return self.async_show_form(
             step_id="select_direction",
-            data_schema=vol.Schema({vol.Required("direction", default=ALL_DIRECTIONS): vol.In(options)}),
+            data_schema=vol.Schema({vol.Required("direction", default=next(iter(senses))): dropdown(options)}),
         )
 
     async def async_step_filters_manual(self, user_input=None):
@@ -526,8 +581,8 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             line = (user_input.get("line") or "").strip()
             self.line_filter = line or None
             self.line_name = line or None
-            self.direction_filter = None
-            self.direction_label = None
+            code = self.stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
+            self.senses = [self._spec(code)]
             return self._create_entry()
 
         return self.async_show_form(
@@ -538,15 +593,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _create_entry(self):
-        """Create the config entry with the stop and optional line/direction filters.
-
-        stop_code is already set when it came from an explicit ambiguous-stop choice
-        (async_step_select_direction sets it directly — one candidate code IS the sense).
-        Otherwise (single candidate, ex. PRIM, or the manual fallback) it's simply the
-        only candidate there is.
-        """
-        if self.stop_code is None:
-            self.stop_code = sorted(self.candidate_codes)[0] if self.candidate_codes else None
+        """Create the config entry from the accumulated sense specs (1 or 2 sensors)."""
         return self.async_create_entry(
             title=f"{self.city} - {self.transit_company}",
             data={
@@ -554,11 +601,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "transit_company": self.transit_company,
                 "api_token": self.api_token,
                 "stop_name": self.stop_name,
-                "stop_code": self.stop_code,
-                "line_filter": self.line_filter,
-                "line_name": self.line_name,
-                "direction_filter": self.direction_filter,
-                "direction_label": self.direction_label,
+                "senses": self.senses,
             },
         )
 
@@ -570,53 +613,61 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
-    """Let the user re-choose the line/direction filter after setup."""
+    """Let the user re-choose the line/direction filter after setup.
+
+    Mono-sens entry : ligne + sens éditables. Entrée « 2 sens » (2 specs) : seule la ligne
+    est éditable (appliquée aux 2 sens) — le partage en 2 sens reste tel quel.
+    """
 
     def __init__(self, config_entry):
         """Initialize options flow."""
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
-        """Re-probe the stop and edit the line/direction filter."""
+        """Re-probe the stop and edit the line (and, mono-sens, the direction) filter."""
         data = self.config_entry.data
-        current = {**data, **self.config_entry.options}
+        specs = entry_sense_specs(self.config_entry)
+        primary = specs[0]
+        multi_sense = len(specs) > 1
 
         calls = await probe_available_passages(
-            self.hass, data["transit_company"], data.get("api_token"), data["stop_code"]
+            self.hass, data["transit_company"], data.get("api_token"), primary.get("stop_code")
         )
         lines = await resolve_line_names(self.hass, _lines_from_calls(calls))
-        senses = _directions_from_calls(calls, current.get("line_filter"))
         line_options = {ALL_LINES: "Toutes les lignes", **lines}
-        dir_options = {ALL_DIRECTIONS: "Tous les sens", **senses}
-
-        # Toujours proposer le filtre courant, même si cette ligne/ce sens ne circule pas
-        # au moment du re-sondage (sinon vol.In rejetterait la valeur par défaut).
-        cur_line = current.get("line_filter") or ALL_LINES
-        cur_dir = current.get("direction_filter") or ALL_DIRECTIONS
+        cur_line = primary.get("line_filter") or ALL_LINES
         if cur_line != ALL_LINES and cur_line not in line_options:
-            line_options[cur_line] = current.get("line_name") or cur_line
+            line_options[cur_line] = primary.get("line_name") or cur_line
+
+        senses = _directions_from_calls(calls, primary.get("line_filter"))
+        dir_options = {ALL_DIRECTIONS: "Tous les sens", **senses}
+        cur_dir = primary.get("direction_filter") or ALL_DIRECTIONS
         if cur_dir != ALL_DIRECTIONS and cur_dir not in dir_options:
-            dir_options[cur_dir] = current.get("direction_label") or cur_dir
+            dir_options[cur_dir] = primary.get("direction_label") or cur_dir
 
         if user_input is not None:
             line = user_input.get("line")
-            direction = user_input.get("direction")
             line_filter = None if not line or line == ALL_LINES else line
-            direction_filter = None if not direction or direction == ALL_DIRECTIONS else direction
-            return self.async_create_entry(
-                title="",
-                data={
+            line_name = line_options.get(line) if line_filter else None
+            if multi_sense:
+                # ligne appliquée aux 2 specs, sens conservés
+                new_specs = [
+                    {**spec, "line_filter": line_filter, "line_name": line_name}
+                    for spec in specs
+                ]
+            else:
+                direction = user_input.get("direction")
+                direction_filter = None if not direction or direction == ALL_DIRECTIONS else direction
+                new_specs = [{
+                    **primary,
                     "line_filter": line_filter,
-                    "line_name": line_options.get(line) if line_filter else None,
+                    "line_name": line_name,
                     "direction_filter": direction_filter,
                     "direction_label": dir_options.get(direction) if direction_filter else None,
-                },
-            )
+                }]
+            return self.async_create_entry(title="", data={"senses": new_specs})
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema({
-                vol.Required("line", default=cur_line): vol.In(line_options),
-                vol.Required("direction", default=cur_dir): vol.In(dir_options),
-            }),
-        )
+        schema = {vol.Required("line", default=cur_line): dropdown(line_options)}
+        if not multi_sense:
+            schema[vol.Required("direction", default=cur_dir)] = dropdown(dir_options)
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

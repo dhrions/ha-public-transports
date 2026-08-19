@@ -1,0 +1,88 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "City",
+        "description": "Choose your city.",
+        "data": {
+          "city": "City"
+        }
+      },
+      "select_company": {
+        "title": "Transit company",
+        "description": "Choose the transit company.",
+        "data": {
+          "transit_company": "Transit company"
+        }
+      },
+      "get_token": {
+        "title": "API token",
+        "description": "Enter your API token (e.g. a65d0a21-560c-43c7-a549-7a27e2413eef).",
+        "data": {
+          "api_token": "API token"
+        }
+      },
+      "get_stop": {
+        "title": "Stop",
+        "description": "Choose a stop.",
+        "data": {
+          "stop_name": "Stop"
+        }
+      },
+      "get_stop_search": {
+        "title": "Search for a stop",
+        "description": "Type the name of the stop to search for (e.g. Châtelet).",
+        "data": {
+          "query": "Stop name"
+        }
+      },
+      "get_stop_select": {
+        "title": "Select the stop",
+        "description": "Choose the stop among the search results.",
+        "data": {
+          "stop_id": "Stop"
+        }
+      },
+      "select_line": {
+        "title": "Line (optional)",
+        "description": "Choose a line to track only that one, or \"All lines\" to track them all.",
+        "data": {
+          "line": "Line"
+        }
+      },
+      "select_direction": {
+        "title": "Direction (optional)",
+        "description": "Choose a direction to track only that one, or \"All directions\" to track them all.",
+        "data": {
+          "direction": "Direction"
+        }
+      },
+      "filters_manual": {
+        "title": "Line filter (optional)",
+        "description": "Nothing is currently running at this stop, so the list could not be offered. Leave empty to track everything, or type a line by hand (e.g. 13). The direction can be chosen later via the options once passages are visible.",
+        "data": {
+          "line": "Line"
+        }
+      }
+    },
+    "error": {
+      "invalid_city": "The chosen city is not valid.",
+      "invalid_company": "The selected transit company is not valid.",
+      "invalid_stop": "The selected stop is invalid.",
+      "no_stops_found": "No stop found for this company.",
+      "no_search_results": "No stop found for this search."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Line / direction filter",
+        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything.",
+        "data": {
+          "line": "Line",
+          "direction": "Direction"
+        }
+      }
+    }
+  }
+}

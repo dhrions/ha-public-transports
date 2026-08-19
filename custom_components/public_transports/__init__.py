@@ -4,7 +4,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import PublicTransportsDataUpdateCoordinator
+from .coordinator import PublicTransportsDataUpdateCoordinator, entry_sense_specs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +28,17 @@ async def async_migrate_entry(hass: HomeAssistant, entry: config_entries.ConfigE
         data = {k: v for k, v in entry.data.items() if k not in ("direction_filter", "direction_label")}
         options = {k: v for k, v in entry.options.items() if k not in ("direction_filter", "direction_label")}
         hass.config_entries.async_update_entry(entry, data=data, options=options, version=2)
+
+    # v2 → v3 : les champs de filtre plats deviennent une liste "senses" (une entrée peut
+    # désormais exposer 2 capteurs). entry_sense_specs lit déjà les 2 formes, mais on
+    # matérialise la migration pour ne pas garder de champs plats ambigus.
+    if entry.version < 3:
+        specs = entry_sense_specs(entry)
+        flat_keys = ("stop_code", "line_filter", "line_name", "direction_filter", "direction_label")
+        data = {k: v for k, v in entry.data.items() if k not in flat_keys}
+        data["senses"] = specs
+        options = {k: v for k, v in entry.options.items() if k not in flat_keys}
+        hass.config_entries.async_update_entry(entry, data=data, options=options, version=3)
     return True
 
 async def _async_update_listener(
@@ -38,13 +49,22 @@ async def _async_update_listener(
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
-    """Set up Public Transports from a config entry."""
+    """Set up Public Transports from a config entry.
+
+    One coordinator per distinct stop code the entry needs (a "both senses" CTS entry has
+    two codes → two coordinators; a PRIM entry has one). Sensors pick their coordinator by
+    stop code and apply their own filter.
+    """
     hass.data.setdefault(DOMAIN, {})
 
-    coordinator = PublicTransportsDataUpdateCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
+    stop_codes = {spec["stop_code"] for spec in entry_sense_specs(entry) if spec.get("stop_code")}
+    coordinators = {}
+    for stop_code in stop_codes:
+        coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, stop_code)
+        await coordinator.async_config_entry_first_refresh()
+        coordinators[stop_code] = coordinator
 
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][entry.entry_id] = coordinators
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
