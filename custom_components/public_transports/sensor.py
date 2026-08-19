@@ -95,17 +95,21 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         if not calls:
             return {}
         call = calls[0]
+        times = [c.extract_remaining_time_before_arrival(unit="minutes") for c in calls]
         return {
             "stop_code": self._spec.get("stop_code"),
             "line": scalar(call.line_ref),
             "published_line_name": scalar(call.published_line_name),
             "destination": scalar(call.destination_name),
+            # Liste plate des minutes des prochains passages, pratique sur un dashboard /
+            # en template (next_times[1] = passage suivant) sans fouiller next_passages.
+            "next_times": times,
             "next_passages": [
                 {
-                    "time": c.extract_remaining_time_before_arrival(unit="minutes"),
+                    "time": time,
                     "line": scalar(c.published_line_name) or scalar(c.line_ref),
                     "destination": scalar(c.destination_name),
                 }
-                for c in calls
+                for c, time in zip(calls, times)
             ],
         }
