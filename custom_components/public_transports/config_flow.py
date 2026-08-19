@@ -162,7 +162,13 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_select_company(self, user_input=None):
-        """Handle the step where the user selects a transit company."""
+        """Handle the step where the user selects a transit company.
+
+        Skipped (auto-selected) when the city has only one company — no real choice.
+        """
+        if len(self.transit_companies) == 1 and user_input is None:
+            user_input = {"transit_company": self.transit_companies[0]}
+
         if user_input is not None:
             self.transit_company = user_input.get("transit_company")
             if self.transit_company in TRANSIT_COMPANIES:
@@ -269,22 +275,19 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors = {}
 
-        # Une clé par (nom, code) plutôt que par nom seul : un même nom recouvre souvent
-        # plusieurs codes CTS distincts, un par sens/quai (ex. "Barr" -> 43A ET 43B). Ne
-        # garder que le premier code écraserait silencieusement le second sens.
+        # Un même nom CTS recouvre souvent plusieurs codes d'arrêt distincts, un par
+        # sens/quai (ex. "Barr" -> 43A ET 43B). On ne choisit pas le code ici : tous les
+        # candidats sont sondés (async_step_filters), et le bon code sera fixé
+        # automatiquement une fois le sens choisi (async_step_select_direction).
         self.stop_names = await self.fetch_stop_names()
-        stop_options = {}
-        for name, codes in self.stop_names:
-            for code in codes:
-                label = name if len(codes) == 1 else f"{name} ({code})"
-                stop_options[f"{name}||{code}"] = label
+        stop_options = {name: name for name, codes in self.stop_names}
 
         if user_input is not None:
             choice = user_input.get("stop_name")
-            if choice in stop_options:
-                _, code = choice.split("||", 1)
-                self.stop_name = stop_options[choice]
-                self.stop_code = code
+            codes = dict(self.stop_names).get(choice)
+            if codes:
+                self.stop_name = choice
+                self.candidate_codes = codes
                 return await self.async_step_filters()
             errors["stop_name"] = "invalid_stop"
 
@@ -368,6 +371,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if zone:
                 self.stop_name = zone["zdaname"]
                 self.stop_code = f"STIF:StopArea:SP:{zdaid}:"
+                self.candidate_codes = [self.stop_code]
                 return await self.async_step_filters()
             errors["stop_id"] = "invalid_stop"
 
@@ -378,17 +382,41 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_filters(self, user_input=None):
-        """Probe the stop and route to line selection, or manual entry if nothing runs."""
-        self.available_calls = await probe_available_passages(
-            self.hass, self.transit_company, self.api_token, self.stop_code
-        )
+        """Probe every candidate stop code and route to line selection.
+
+        A stop name can cover several physical codes (ex. CTS "Barr" -> 43A/43B, one per
+        sense). All are probed and merged here so line/direction selection sees the full
+        picture; async_step_select_direction picks the right code once the sense is chosen.
+        """
+        self.candidate_calls = []
+        for code in self.candidate_codes:
+            calls = await probe_available_passages(
+                self.hass, self.transit_company, self.api_token, code
+            )
+            self.candidate_calls.extend((call, code) for call in calls)
+        self.available_calls = [call for call, _ in self.candidate_calls]
+
         if not self.available_calls:
             return await self.async_step_filters_manual()
         return await self.async_step_select_line()
 
     async def async_step_select_line(self, user_input=None):
-        """Let the user optionally restrict the stop to a single line."""
+        """Let the user optionally restrict the stop to a single line.
+
+        Skipped (auto-selected) when at most one line is actually circulating — a choice
+        between "cette ligne" et "toutes les lignes" ne veut rien dire s'il n'y en a
+        qu'une.
+        """
         lines = await resolve_line_names(self.hass, _lines_from_calls(self.available_calls))
+
+        if len(lines) <= 1:
+            if lines:
+                self.line_filter, self.line_name = next(iter(lines.items()))
+            else:
+                self.line_filter = None
+                self.line_name = None
+            return await self.async_step_select_direction()
+
         options = {ALL_LINES: "Toutes les lignes", **lines}
 
         if user_input is not None:
@@ -406,15 +434,69 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("line", default=ALL_LINES): vol.In(options)}),
         )
 
+    def _codes_from_candidates(self):
+        """One entry per physical candidate code — the structural sense split for an
+        ambiguous CTS stop (ex. "Barr" -> 43A/43B).
+
+        Unlike _directions_from_calls (which groups by the live DirectionRef of whatever
+        is currently circulating), this always lists every candidate code, even one with
+        zero passages during the probe (a transient traffic gap on one platform is not the
+        absence of that sense). The label is composed from that code's own probed
+        terminuses when available, or the bare code as a last resort.
+        """
+        options = {}
+        for code in self.candidate_codes:
+            code_calls = [
+                call for call, c in self.candidate_calls
+                if c == code and (not self.line_filter or scalar(call.line_ref) == self.line_filter)
+            ]
+            terminuses = sorted({
+                scalar(call.destination_name) for call in code_calls if scalar(call.destination_name)
+            })
+            options[code] = " / ".join(terminuses) if terminuses else code
+        return options
+
     async def async_step_select_direction(self, user_input=None):
-        """Let the user optionally restrict the stop to a single sense (DirectionRef)."""
+        """Let the user pick a sense.
+
+        Ambiguous CTS stop (several physical codes) : chaque code EST un sens — choix
+        obligatoire (pas de "tous les sens", un capteur ne suit qu'un seul MonitoringRef),
+        toujours proposé même sans trafic instantané sur l'un des deux (cf.
+        _codes_from_candidates). Le code choisi devient directement stop_code.
+
+        Sinon (un seul code physique, ex. PRIM) : sens dérivés du DirectionRef des
+        passages en circulation, comme avant — c'est la seule source disponible ici.
+        """
+        if len(self.candidate_codes) > 1:
+            options = self._codes_from_candidates()
+
+            if len(options) <= 1:
+                code, label = next(iter(options.items())) if options else (sorted(self.candidate_codes)[0], None)
+                self.stop_code = code
+                self.direction_filter = None
+                self.direction_label = label
+                return self._create_entry()
+
+            if user_input is not None:
+                choice = user_input.get("direction")
+                self.stop_code = choice
+                self.direction_filter = None
+                self.direction_label = options.get(choice)
+                return self._create_entry()
+
+            return self.async_show_form(
+                step_id="select_direction",
+                data_schema=vol.Schema({vol.Required("direction", default=next(iter(options))): vol.In(options)}),
+            )
+
         senses = _directions_from_calls(self.available_calls, self.line_filter)
 
-        # Si l'API n'expose pas de sens exploitable (ex. CTS peut ne pas fournir
-        # DirectionRef), n'imposer aucune étape : on suit tous les sens.
-        if not senses:
-            self.direction_filter = None
-            self.direction_label = None
+        if len(senses) <= 1:
+            if senses:
+                self.direction_filter, self.direction_label = next(iter(senses.items()))
+            else:
+                self.direction_filter = None
+                self.direction_label = None
             return self._create_entry()
 
         options = {ALL_DIRECTIONS: "Tous les sens", **senses}
@@ -456,7 +538,15 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _create_entry(self):
-        """Create the config entry with the stop and optional line/direction filters."""
+        """Create the config entry with the stop and optional line/direction filters.
+
+        stop_code is already set when it came from an explicit ambiguous-stop choice
+        (async_step_select_direction sets it directly — one candidate code IS the sense).
+        Otherwise (single candidate, ex. PRIM, or the manual fallback) it's simply the
+        only candidate there is.
+        """
+        if self.stop_code is None:
+            self.stop_code = sorted(self.candidate_codes)[0] if self.candidate_codes else None
         return self.async_create_entry(
             title=f"{self.city} - {self.transit_company}",
             data={

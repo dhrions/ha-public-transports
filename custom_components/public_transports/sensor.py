@@ -78,6 +78,7 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
             return {}
         calls = self.coordinator.data or []
         return {
+            "stop_code": self._entry.data.get("stop_code"),
             "line": scalar(call.line_ref),
             "published_line_name": scalar(call.published_line_name),
             "destination": scalar(call.destination_name),
