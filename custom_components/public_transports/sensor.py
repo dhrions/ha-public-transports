@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from siri_lite.models import MonitoredCall
 
 from .const import DOMAIN
-from .coordinator import PublicTransportsDataUpdateCoordinator
+from .coordinator import PublicTransportsDataUpdateCoordinator, scalar
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +38,24 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_next_passage"
-        self._attr_name = f"{entry.data['stop_name']} - prochain passage"
+        self._attr_name = self._build_name(entry)
+
+    @staticmethod
+    def _build_name(entry: ConfigEntry) -> str:
+        """Build a name that surfaces the line/direction filter when set.
+
+        Ex. "Gaîté L13 → Châtillon Montrouge - prochain passage" when filtered,
+        or "Gaîté - prochain passage" when tracking the whole stop.
+        """
+        config = {**entry.data, **entry.options}
+        name = config["stop_name"]
+        line_name = config.get("line_name")
+        direction = config.get("direction_filter")
+        if line_name:
+            name += f" {line_name}"
+        if direction:
+            name += f" → {direction}"
+        return f"{name} - prochain passage"
 
     @property
     def _next_call(self) -> MonitoredCall | None:
@@ -61,10 +78,15 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
             return {}
         calls = self.coordinator.data or []
         return {
-            "line": call.line_ref,
-            "published_line_name": call.published_line_name,
-            "destination": call.destination_name,
+            "line": scalar(call.line_ref),
+            "published_line_name": scalar(call.published_line_name),
+            "destination": scalar(call.destination_name),
             "next_passages": [
-                c.extract_remaining_time_before_arrival(unit="minutes") for c in calls
+                {
+                    "time": c.extract_remaining_time_before_arrival(unit="minutes"),
+                    "line": scalar(c.published_line_name) or scalar(c.line_ref),
+                    "destination": scalar(c.destination_name),
+                }
+                for c in calls
             ],
         }

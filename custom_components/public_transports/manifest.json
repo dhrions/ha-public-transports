@@ -7,5 +7,5 @@
   "iot_class": "cloud_polling",
   "name": "Public Transports",
   "requirements": ["requests>=2.32", "siri-lite>=0.6.0"],
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

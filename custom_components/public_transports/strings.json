@@ -1,0 +1,89 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ville",
+        "description": "Choisissez votre ville.",
+        "data": {
+          "city": "Ville"
+        }
+      },
+      "select_company": {
+        "title": "Compagnie de transport",
+        "description": "Choisissez la compagnie de transport.",
+        "data": {
+          "transit_company": "Compagnie de transport"
+        }
+      },
+      "get_token": {
+        "title": "Token API",
+        "description": "Entrez votre token API (ex. : a65d0a21-560c-43c7-a549-7a27e2413eef).",
+        "data": {
+          "api_token": "Token API"
+        }
+      },
+      "get_stop": {
+        "title": "Arrêt",
+        "description": "Choisissez un arrêt.",
+        "data": {
+          "stop_name": "Arrêt"
+        }
+      },
+      "get_stop_search": {
+        "title": "Rechercher un arrêt",
+        "description": "Tapez le nom de l'arrêt à rechercher (ex. : Châtelet).",
+        "data": {
+          "query": "Nom de l'arrêt"
+        }
+      },
+      "get_stop_select": {
+        "title": "Sélectionner l'arrêt",
+        "description": "Choisissez l'arrêt parmi les résultats de la recherche.",
+        "data": {
+          "stop_id": "Arrêt"
+        }
+      },
+      "select_line": {
+        "title": "Ligne (facultatif)",
+        "description": "Choisissez une ligne pour ne suivre que celle-ci, ou « Toutes les lignes » pour tout suivre.",
+        "data": {
+          "line": "Ligne"
+        }
+      },
+      "select_direction": {
+        "title": "Sens (facultatif)",
+        "description": "Choisissez un sens (terminus) pour ne suivre que celui-ci, ou « Tous les sens » pour tout suivre.",
+        "data": {
+          "direction": "Sens"
+        }
+      },
+      "filters_manual": {
+        "title": "Filtre ligne / sens (facultatif)",
+        "description": "Aucun passage ne circule actuellement à cet arrêt : la liste n'a pas pu être proposée. Laissez vide pour tout suivre, ou saisissez à la main une ligne (ex. : 13) et/ou un sens (terminus, ex. : Châtillon Montrouge).",
+        "data": {
+          "line": "Ligne",
+          "direction": "Sens (terminus)"
+        }
+      }
+    },
+    "error": {
+      "invalid_city": "La ville indiquée n'est pas valide.",
+      "invalid_company": "La compagnie de transport sélectionnée n'est pas valide.",
+      "invalid_stop": "L'arrêt sélectionné est invalide.",
+      "no_stops_found": "Aucun arrêt de bus trouvé pour cette compagnie.",
+      "no_search_results": "Aucun arrêt trouvé pour cette recherche."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Filtre ligne / sens",
+        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout.",
+        "data": {
+          "line": "Ligne",
+          "direction": "Sens"
+        }
+      }
+    }
+  }
+}

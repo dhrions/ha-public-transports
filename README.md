@@ -7,8 +7,11 @@
 
 - 🚌 Configure un arrêt (ville, compagnie, arrêt) via l'UI Home Assistant et expose un
   capteur : temps restant avant le prochain passage, ligne, destination.
-- 🎯 Réseau supporté aujourd'hui : **CTS (Strasbourg)**. D'autres compagnies SIRI-lite
-  peuvent être ajoutées dans `const.py`.
+- 🎯 Réseaux supportés aujourd'hui : **CTS (Strasbourg/Schiltigheim)**. **IDF Mobilités /
+  RATP (Paris, via PRIM)** est câblé mais non fonctionnel pour l'instant : l'étape de
+  découverte des arrêts échoue (l'API PRIM souscrite n'expose pas `stoppoints-discovery`,
+  seulement `stop-monitoring` — cf. « Hors périmètre actuel »). D'autres compagnies
+  SIRI-lite peuvent être ajoutées dans `const.py`.
 - 🚀 Installation : copier `custom_components/public_transports/` dans le dossier
   `custom_components` de Home Assistant (ou via HACS), redémarrer, puis ajouter
   l'intégration **Public Transports** depuis les paramètres.
@@ -24,16 +27,26 @@
 
 ## Configuration
 
-L'assistant de configuration guide en 4 étapes :
+L'assistant de configuration guide en plusieurs étapes :
 
-1. **Ville** (ex. `Strasbourg`).
-2. **Compagnie de transport** — pour Strasbourg/Schiltigheim, la CTS (Compagnie des
-   Transports Strasbourgeois) est actuellement la seule compagnie câblée.
-3. **Token API** — un token CTS est nécessaire (authentification Basic Auth auprès de
-   l'API SIRI-lite de la CTS).
+1. **Ville** — parmi les villes ayant au moins une compagnie câblée (`Strasbourg`,
+   `Schiltigheim`, `Paris`).
+2. **Compagnie de transport** — CTS pour Strasbourg/Schiltigheim ; IDF Mobilités / RATP
+   pour Paris.
+3. **Token API** — nécessaire dans tous les cas : un token CTS (Basic Auth) pour la CTS,
+   ou une clé API PRIM (header `apiKey`, à obtenir sur
+   [prim.iledefrance-mobilites.fr](https://prim.iledefrance-mobilites.fr/)) pour IDF
+   Mobilités / RATP.
 4. **Arrêt** — sélection dans la liste des arrêts découverts pour la compagnie choisie.
+5. **Ligne** *(facultatif)* — pour ne suivre qu'une ligne précise à cet arrêt, ou
+   « Toutes les lignes ». Les lignes proposées sont celles qui circulent au moment de la
+   configuration (sondage temps réel de l'API).
+6. **Sens** *(facultatif)* — pour ne suivre qu'un sens (terminus), ou « Tous les sens ».
 
-Une entrée de configuration = un arrêt suivi.
+Le filtre ligne/sens est **modifiable après coup** sans supprimer l'arrêt : *Paramètres →
+Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*.
+
+Une entrée de configuration = un arrêt suivi (éventuellement restreint à une ligne / un sens).
 
 ## Capteur
 
@@ -44,8 +57,13 @@ Chaque arrêt configuré crée un capteur `sensor.<nom_arrêt>_prochain_passage`
 | État | Temps restant avant le prochain passage, en minutes |
 | `line` | Référence de la ligne |
 | `published_line_name` | Nom publié de la ligne |
-| `destination` | Destination du véhicule |
-| `next_passages` | Liste des temps restants (minutes) pour tous les passages retournés |
+| `destination` | Destination du véhicule (prochain passage) |
+| `next_passages` | Liste de tous les passages retournés : `{time, line, destination}` chacun — utile pour distinguer les sens quand l'arrêt dessert plusieurs lignes/directions (ex. un `StopArea` PRIM) |
+
+Quand un filtre ligne et/ou sens est appliqué, le **nom du capteur** le reflète directement
+(ex. `Gaîté 13 → Châtillon Montrouge - prochain passage`), et l'état ne compte que les
+passages correspondant au filtre. Sans filtre, le nom reste `<nom_arrêt> - prochain passage`
+et tous les passages sont pris en compte.
 
 Le capteur est rafraîchi toutes les 60 secondes (intervalle fixe pour l'instant, non
 configurable via l'UI).
@@ -59,5 +77,4 @@ la configuration) reste implémentée directement dans cette intégration.
 
 ## Hors périmètre actuel
 
-- PRIM / Île-de-France Mobilités (siri-lite le supporte, pas encore câblé côté intégration).
 - Intervalle de rafraîchissement configurable.
