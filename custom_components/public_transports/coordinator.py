@@ -4,17 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, time, timedelta
 from urllib.parse import quote
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException
 from siri_lite.models import MonitoredCall
 from siri_lite.siri_client import SiriClient
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, TRANSIT_COMPANIES
+from .const import (
+    CONF_ACTIVE_END,
+    CONF_ACTIVE_START,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_ACTIVE_END,
+    DEFAULT_ACTIVE_START,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL_MINUTES,
+    MIN_SCAN_INTERVAL_MINUTES,
+    TRANSIT_COMPANIES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +46,50 @@ def scalar(value):
     if isinstance(value, dict):
         return value.get("value")
     return value
+
+
+def entry_scan_interval(entry: ConfigEntry) -> timedelta:
+    """Return the polling period for this entry, options overriding data.
+
+    Falls back to DEFAULT_SCAN_INTERVAL for entries created before the setting existed,
+    and clamps to the bounds the options form enforces so a hand-edited .storage value
+    can't drive the quota through the floor.
+    """
+    config = {**entry.data, **entry.options}
+    try:
+        minutes = int(config.get(CONF_SCAN_INTERVAL))
+    except (TypeError, ValueError):
+        return DEFAULT_SCAN_INTERVAL
+    minutes = max(MIN_SCAN_INTERVAL_MINUTES, min(MAX_SCAN_INTERVAL_MINUTES, minutes))
+    return timedelta(minutes=minutes)
+
+
+def parse_hhmm(value, fallback: str) -> time:
+    """Parse a "HH:MM" string into a time, falling back on anything unparseable."""
+    try:
+        hours, minutes = str(value).split(":")
+        return time(int(hours), int(minutes))
+    except (AttributeError, TypeError, ValueError):
+        hours, minutes = fallback.split(":")
+        return time(int(hours), int(minutes))
+
+
+def within_active_window(entry: ConfigEntry, now: datetime) -> bool:
+    """Whether `now` (local time) falls inside the entry's active polling window.
+
+    A window whose end is earlier than its start is read as spanning midnight
+    (e.g. 22:00 -> 06:00). Start == end means "always active", which is how an entry
+    opts out of windowing entirely.
+    """
+    config = {**entry.data, **entry.options}
+    start = parse_hhmm(config.get(CONF_ACTIVE_START), DEFAULT_ACTIVE_START)
+    end = parse_hhmm(config.get(CONF_ACTIVE_END), DEFAULT_ACTIVE_END)
+    if start == end:
+        return True
+    current = now.time()
+    if start < end:
+        return start <= current < end
+    return current >= start or current < end
 
 
 def spec_stop_codes(spec: dict) -> list[str]:
@@ -121,7 +178,10 @@ class PublicTransportsDataUpdateCoordinator(DataUpdateCoordinator[list[Monitored
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, stop_codes: list[str]) -> None:
         """Initialize the coordinator for one or more stop codes."""
         super().__init__(
-            hass, _LOGGER, name=f"{DOMAIN}:{'+'.join(stop_codes)}", update_interval=DEFAULT_SCAN_INTERVAL
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}:{'+'.join(stop_codes)}",
+            update_interval=entry_scan_interval(entry),
         )
         self.entry = entry
         self.stop_codes = stop_codes
@@ -139,7 +199,17 @@ class PublicTransportsDataUpdateCoordinator(DataUpdateCoordinator[list[Monitored
         _calls[0] = next passage) keeps working unchanged whether reading one stop code
         or several. Assumes a consistent timezone offset format across a pole's codes,
         which holds for a single transit company's SIRI feed.
+
+        Outside the configured active window, no API call is issued at all: the last
+        known data is returned as-is. Skipping the call rather than stopping the timer
+        keeps the coordinator's lifecycle untouched, and the quota is what we protect.
         """
+        if not within_active_window(self.entry, dt_util.now()):
+            _LOGGER.debug(
+                "%s: hors plage active, aucun appel API (dernière donnée conservée)", self.name
+            )
+            return self.data or []
+
         try:
             results = await asyncio.gather(*[
                 self.hass.async_add_executor_job(client.fetch_next_calls)

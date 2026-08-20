@@ -2,7 +2,26 @@ from datetime import timedelta
 
 DOMAIN = "public_transports"
 
-DEFAULT_SCAN_INTERVAL = timedelta(seconds=60)
+# Le quota de l'API est compté par token, pas par intégration : un même token peut être
+# partagé par plusieurs instances HA et par d'autres clients (extension GNOME, scripts).
+# Un coordinateur émet un appel PAR code d'arrêt et par cycle, donc une entrée « pôle »
+# à N quais ou « les deux sens » multiplie d'autant. À 60 s en continu, un seul arrêt
+# consommait déjà 1440 appels/jour — au-delà d'un quota courant de 1000/jour. D'où un
+# défaut à 2 min, restreint à une plage horaire active.
+DEFAULT_SCAN_INTERVAL = timedelta(minutes=2)
+
+CONF_SCAN_INTERVAL = "scan_interval"
+CONF_ACTIVE_START = "active_start"
+CONF_ACTIVE_END = "active_end"
+
+# Minutes, bornes de l'intervalle réglable dans les options.
+MIN_SCAN_INTERVAL_MINUTES = 1
+MAX_SCAN_INTERVAL_MINUTES = 60
+
+# Plage horaire active par défaut (heure locale HA). Hors de cette plage, le coordinateur
+# n'appelle pas l'API et conserve la dernière donnée connue.
+DEFAULT_ACTIVE_START = "07:00"
+DEFAULT_ACTIVE_END = "20:00"
 
 # Référentiel public IDFM des zones d'arrêt (StopArea), sans authentification.
 # zdaid <n> correspond directement au MonitoringRef SIRI STIF:StopArea:SP:<n>:

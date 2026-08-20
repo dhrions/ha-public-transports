@@ -83,11 +83,14 @@
   "options": {
     "step": {
       "init": {
-        "title": "Line / direction filter",
-        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything.",
+        "title": "Line / direction filter and polling",
+        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything. The interval and active window drive API quota usage: one call is issued per stop code per cycle. Setting the same start and end (e.g. 00:00/00:00) polls around the clock.",
         "data": {
           "line": "Line",
-          "direction": "Direction"
+          "direction": "Direction",
+          "scan_interval": "Refresh interval (minutes)",
+          "active_start": "Active window start (HH:MM)",
+          "active_end": "Active window end (HH:MM)"
         }
       }
     }

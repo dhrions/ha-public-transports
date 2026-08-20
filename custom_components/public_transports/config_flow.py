@@ -1,16 +1,36 @@
+import logging
+
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
-    SelectOptionDict,
 )
-import aiohttp
-import logging
-from .const import DOMAIN, CITIES_DATA, TRANSIT_COMPANIES, IDFM_ZONES_API_URL, IDFM_LINES_API_URL
-from .coordinator import build_siri_client, entry_sense_specs, scalar
+
+from .const import (
+    CITIES_DATA,
+    CONF_ACTIVE_END,
+    CONF_ACTIVE_START,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_ACTIVE_END,
+    DEFAULT_ACTIVE_START,
+    DOMAIN,
+    IDFM_LINES_API_URL,
+    IDFM_ZONES_API_URL,
+    MAX_SCAN_INTERVAL_MINUTES,
+    MIN_SCAN_INTERVAL_MINUTES,
+    TRANSIT_COMPANIES,
+)
+from .coordinator import (
+    build_siri_client,
+    entry_scan_interval,
+    entry_sense_specs,
+    scalar,
+)
 
 
 def dropdown(options):
@@ -736,6 +756,13 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         if cur_dir != ALL_DIRECTIONS and cur_dir not in dir_options:
             dir_options[cur_dir] = primary.get("direction_label") or cur_dir
 
+        config = {**self.config_entry.data, **self.config_entry.options}
+        cur_interval = int(
+            entry_scan_interval(self.config_entry).total_seconds() // 60
+        )
+        cur_start = config.get(CONF_ACTIVE_START) or DEFAULT_ACTIVE_START
+        cur_end = config.get(CONF_ACTIVE_END) or DEFAULT_ACTIVE_END
+
         if user_input is not None:
             line = user_input.get("line")
             line_filter = None if not line or line == ALL_LINES else line
@@ -756,9 +783,22 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                     "direction_filter": direction_filter,
                     "direction_label": dir_options.get(direction) if direction_filter else None,
                 }]
-            return self.async_create_entry(title="", data={"senses": new_specs})
+            return self.async_create_entry(title="", data={
+                "senses": new_specs,
+                CONF_SCAN_INTERVAL: user_input.get(CONF_SCAN_INTERVAL, cur_interval),
+                CONF_ACTIVE_START: user_input.get(CONF_ACTIVE_START, cur_start),
+                CONF_ACTIVE_END: user_input.get(CONF_ACTIVE_END, cur_end),
+            })
 
         schema = {vol.Required("line", default=cur_line): dropdown(line_options)}
         if not multi_sense:
             schema[vol.Required("direction", default=cur_dir)] = dropdown(dir_options)
+        # Fréquence et plage active : ce qui décide de la consommation de quota, un appel
+        # étant émis par code d'arrêt et par cycle (cf. const.py).
+        schema[vol.Required(CONF_SCAN_INTERVAL, default=cur_interval)] = vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_SCAN_INTERVAL_MINUTES, max=MAX_SCAN_INTERVAL_MINUTES),
+        )
+        schema[vol.Required(CONF_ACTIVE_START, default=cur_start)] = str
+        schema[vol.Required(CONF_ACTIVE_END, default=cur_end)] = str
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

@@ -1,5 +1,6 @@
 """Tests for the PublicTransportsDataUpdateCoordinator."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,13 +9,24 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from requests.exceptions import RequestException
 from siri_lite.models import MonitoredCall
 
-from custom_components.public_transports.const import DOMAIN, TRANSIT_COMPANIES
+from custom_components.public_transports.const import (
+    CONF_ACTIVE_END,
+    CONF_ACTIVE_START,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL_MINUTES,
+    MIN_SCAN_INTERVAL_MINUTES,
+    TRANSIT_COMPANIES,
+)
 from custom_components.public_transports.coordinator import (
     PublicTransportsDataUpdateCoordinator,
     build_siri_client,
     call_matches,
+    entry_scan_interval,
     scalar,
     spec_stop_codes,
+    within_active_window,
 )
 
 ENTRY_DATA = {
@@ -23,6 +35,11 @@ ENTRY_DATA = {
     "api_token": "fake-token",
     "stop_name": "Homme de Fer",
     "stop_code": "43A",
+    # Fenêtre dégénérée (début == fin) = toujours active. Sans cela, les tests qui
+    # appellent _async_update_data dépendraient de l'heure à laquelle la suite tourne :
+    # hors 07:00-20:00 le coordinateur saute l'appel API et ils échoueraient la nuit.
+    CONF_ACTIVE_START: "00:00",
+    CONF_ACTIVE_END: "00:00",
 }
 
 
@@ -143,3 +160,126 @@ def test_build_siri_client_uses_apikey_header_for_prim():
 
     assert client.api_request.auth is None
     assert client.api_request.headers.get("apiKey") == "fake-prim-key"
+
+
+# --- Fréquence de sondage et plage active (protection du quota API) -------------------
+
+
+def test_entry_scan_interval_defaults_when_unset():
+    """A pre-existing entry, created before the setting, keeps the default."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    assert entry_scan_interval(entry) == DEFAULT_SCAN_INTERVAL
+
+
+def test_entry_scan_interval_reads_options_over_data():
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**ENTRY_DATA, CONF_SCAN_INTERVAL: 2},
+        options={CONF_SCAN_INTERVAL: 10},
+    )
+    assert entry_scan_interval(entry).total_seconds() == 10 * 60
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected_minutes"),
+    [
+        (0, MIN_SCAN_INTERVAL_MINUTES),
+        (-5, MIN_SCAN_INTERVAL_MINUTES),
+        (9999, MAX_SCAN_INTERVAL_MINUTES),
+    ],
+)
+def test_entry_scan_interval_clamps_out_of_range(stored, expected_minutes):
+    """A hand-edited .storage value must not be able to hammer the API."""
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, CONF_SCAN_INTERVAL: stored})
+    assert entry_scan_interval(entry).total_seconds() == expected_minutes * 60
+
+
+def test_entry_scan_interval_falls_back_on_unparseable_value():
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, CONF_SCAN_INTERVAL: "abc"})
+    assert entry_scan_interval(entry) == DEFAULT_SCAN_INTERVAL
+
+
+def _entry_with_window(start, end):
+    return MockConfigEntry(
+        domain=DOMAIN, data={**ENTRY_DATA, CONF_ACTIVE_START: start, CONF_ACTIVE_END: end}
+    )
+
+
+@pytest.mark.parametrize(
+    ("hour", "inside"),
+    [(6, False), (7, True), (12, True), (19, True), (20, False), (23, False)],
+)
+def test_within_active_window_daytime_range(hour, inside):
+    """End is exclusive: 20:00 with a 07:00-20:00 window is already outside."""
+    entry = _entry_with_window("07:00", "20:00")
+    now = datetime(2026, 8, 20, hour, 0, tzinfo=timezone.utc)
+    assert within_active_window(entry, now) is inside
+
+
+@pytest.mark.parametrize(
+    ("hour", "inside"),
+    [(21, False), (22, True), (23, True), (0, True), (5, True), (6, False)],
+)
+def test_within_active_window_spans_midnight(hour, inside):
+    """An end earlier than the start reads as wrapping past midnight."""
+    entry = _entry_with_window("22:00", "06:00")
+    now = datetime(2026, 8, 20, hour, 0, tzinfo=timezone.utc)
+    assert within_active_window(entry, now) is inside
+
+
+def test_within_active_window_equal_bounds_is_always_active():
+    """start == end is the opt-out: poll around the clock."""
+    entry = _entry_with_window("00:00", "00:00")
+    assert within_active_window(entry, datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc)) is True
+
+
+def test_within_active_window_falls_back_on_garbage_bounds():
+    """Unparseable bounds must not disable polling — they fall back to the default."""
+    entry = _entry_with_window("nonsense", None)
+    assert within_active_window(entry, datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)) is True
+    assert within_active_window(entry, datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc)) is False
+
+
+async def test_update_data_skips_api_call_outside_active_window(hass):
+    """The whole point: no HTTP call at all outside the window."""
+    entry = _entry_with_window("07:00", "20:00")
+    entry.add_to_hass(hass)
+    coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
+    coordinator.data = ["previous"]
+
+    with (
+        patch(
+            "custom_components.public_transports.coordinator.dt_util.now",
+            return_value=datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc),
+        ),
+        patch.object(hass, "async_add_executor_job", new=AsyncMock()) as mock_executor,
+    ):
+        result = await coordinator._async_update_data()
+
+    mock_executor.assert_not_awaited()
+    assert result == ["previous"]
+
+
+async def test_update_data_calls_api_inside_active_window(hass):
+    entry = _entry_with_window("07:00", "20:00")
+    entry.add_to_hass(hass)
+    coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
+    expected = [MonitoredCall(stop_point_name="Homme de Fer")]
+
+    with (
+        patch(
+            "custom_components.public_transports.coordinator.dt_util.now",
+            return_value=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
+        ),
+        patch.object(hass, "async_add_executor_job", new=AsyncMock(return_value=expected)),
+    ):
+        result = await coordinator._async_update_data()
+
+    assert result == expected
+
+
+def test_coordinator_uses_entry_interval(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, CONF_SCAN_INTERVAL: 5})
+    entry.add_to_hass(hass)
+    coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
+    assert coordinator.update_interval.total_seconds() == 5 * 60

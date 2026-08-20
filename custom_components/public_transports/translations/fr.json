@@ -83,11 +83,14 @@
   "options": {
     "step": {
       "init": {
-        "title": "Filtre ligne / sens",
-        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout.",
+        "title": "Filtre ligne / sens et fréquence",
+        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. La fréquence et la plage horaire décident de la consommation du quota d'API : un appel est émis par code d'arrêt et par cycle. Mettre le même début et la même fin de plage (ex. 00:00/00:00) sonde en continu.",
         "data": {
           "line": "Ligne",
-          "direction": "Sens"
+          "direction": "Sens",
+          "scan_interval": "Intervalle de rafraîchissement (minutes)",
+          "active_start": "Début de la plage active (HH:MM)",
+          "active_end": "Fin de la plage active (HH:MM)"
         }
       }
     }

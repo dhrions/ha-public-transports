@@ -78,8 +78,27 @@ les passages du sens choisi. Sans filtre, le nom reste `<nom_arrêt> - prochain 
 tous les passages sont pris en compte. Le terminus précis de chaque rame reste dans
 `next_passages`.
 
-Le capteur est rafraîchi toutes les 60 secondes (intervalle fixe pour l'instant, non
-configurable via l'UI).
+## ⏱️ Fréquence de rafraîchissement et quota d'API
+
+Par défaut, le capteur est rafraîchi **toutes les 2 minutes, entre 07:00 et 20:00**
+(heure locale de Home Assistant). Hors de cette plage, aucun appel n'est émis et la
+dernière valeur connue est conservée. Les deux réglages sont modifiables : *Paramètres →
+Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*.
+
+⚠️ **Ces valeurs par défaut existent pour protéger un quota d'API partagé.** Le quota est
+compté **par token**, pas par intégration : un même token peut alimenter plusieurs
+instances HA et d'autres clients. Et un appel est émis **par code d'arrêt et par cycle** —
+une entrée « les deux sens » (CTS) ou un pôle multimodal à N quais multiplie d'autant :
+
+| Configuration | Appels/cycle | 60 s, 24 h/24 | 2 min, 07:00–20:00 |
+|---|---|---|---|
+| 1 arrêt simple | 1 | 1 440/jour | 390/jour |
+| « Les deux sens » (CTS) | 2 | 2 880/jour | 780/jour |
+| Pôle à N quais | N | 1 440 × N | 390 × N |
+
+Avec un quota courant de 1 000 appels/jour, l'ancien défaut (60 s en continu) le dépassait
+donc **avec un seul arrêt**. Pour désactiver complètement la restriction horaire, mettre
+la même valeur en début et en fin de plage (ex. `00:00`/`00:00`).
 
 ## 📦 Dépendances
 
