@@ -38,6 +38,11 @@ L'assistant de configuration guide en plusieurs étapes :
    [prim.iledefrance-mobilites.fr](https://prim.iledefrance-mobilites.fr/)) pour IDF
    Mobilités / RATP.
 4. **Arrêt** — sélection dans la liste des arrêts découverts pour la compagnie choisie.
+   *(IDF Mobilités / RATP uniquement)* Si l'arrêt choisi appartient à un pôle multimodal
+   (zone de correspondance IDFM `zdcid` partagée avec d'autres arrêts, ex. quais bus +
+   métro d'une même place), une étape supplémentaire propose de **regrouper tout le pôle
+   dans un seul capteur** plutôt que de ne suivre que ce quai précis. Purement opt-in ; sans
+   pôle détecté, cette étape n'apparaît pas.
 5. **Ligne** *(facultatif)* — pour ne suivre qu'une ligne précise à cet arrêt, ou
    « Toutes les lignes ». Les lignes proposées sont celles qui circulent au moment de la
    configuration (sondage temps réel de l'API).
@@ -59,7 +64,8 @@ Chaque arrêt configuré crée un capteur `sensor.<nom_arrêt>_prochain_passage`
 | Champ | Contenu |
 |---|---|
 | État | Temps restant avant le prochain passage, en minutes |
-| `stop_code` | Code d'arrêt physique effectivement interrogé (ex. quai précis d'un arrêt CTS à plusieurs codes) |
+| `stop_code` | Code d'arrêt physique effectivement interrogé (ex. quai précis d'un arrêt CTS à plusieurs codes) — pour un pôle regroupé, le code primaire (premier arrêt choisi) |
+| `stop_codes` | Liste de tous les codes d'arrêt physiques interrogés par ce capteur — un seul élément hors regroupement de pôle, plusieurs pour un pôle multimodal |
 | `line` | Référence de la ligne |
 | `published_line_name` | Nom publié de la ligne |
 | `destination` | Terminus du véhicule (prochain passage) |

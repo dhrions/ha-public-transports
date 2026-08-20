@@ -230,6 +230,68 @@ def test_reused_token_returns_existing_token_for_same_company(hass):
     assert flow._reused_token() == "existing-token"
 
 
+def test_spec_with_stop_codes_keeps_primary_stop_code_and_full_list():
+    """A pole spec carries both stop_code (primary, back-compat) and stop_codes (full list)."""
+    flow = _flow()
+    flow.line_filter = None
+    flow.line_name = None
+
+    spec = flow._spec("A", stop_codes=["A", "B", "C"])
+
+    assert spec["stop_code"] == "A"
+    assert spec["stop_codes"] == ["A", "B", "C"]
+
+
+def test_spec_without_stop_codes_has_no_stop_codes_key():
+    """Non-pole specs stay byte-identical to before — no stop_codes key at all."""
+    flow = _flow()
+    flow.candidate_codes = ["A"]
+
+    spec = flow._spec("A")
+
+    assert "stop_codes" not in spec
+
+
+async def test_select_direction_pole_mode_skips_ambiguous_cts_branch(hass):
+    """pole_codes set + candidate_codes > 1 must NOT trigger the CTS "pick one code as the
+    sense" branch — it must merge into shared specs via the real-sense (PRIM) branch
+    instead, since candidate_codes here means "codes to merge", not "codes to choose from".
+    """
+    flow = _flow(hass)
+    flow.pole_codes = ["A", "B"]
+    flow.candidate_codes = ["A", "B"]
+    flow.stop_code = "A"
+    flow.line_filter = "C01383"
+    flow.available_calls = [
+        MonitoredCall(line_ref="C01383", direction_ref="Aller", destination_name="Asnières"),
+    ]
+
+    result = await flow.async_step_select_direction()
+
+    assert result["type"] == "create_entry"
+    specs = result["data"]["senses"]
+    assert len(specs) == 1
+    assert specs[0]["stop_codes"] == ["A", "B"]
+    assert specs[0]["stop_code"] == "A"
+    assert specs[0]["direction_filter"] == "Aller"
+
+
+async def test_select_direction_pole_mode_both_senses_shares_stop_codes(hass):
+    flow = _flow(hass)
+    flow.pole_codes = ["A", "B"]
+    flow.candidate_codes = ["A", "B"]
+    flow.stop_code = "A"
+    flow.line_filter = "C01383"
+    flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
+
+    result = await flow.async_step_select_direction({"direction": BOTH_SENSES})
+
+    specs = result["data"]["senses"]
+    assert len(specs) == 2
+    assert {s["direction_filter"] for s in specs} == {"Aller", "Retour"}
+    assert all(s["stop_codes"] == ["A", "B"] for s in specs)
+
+
 def test_reused_token_returns_none_for_different_company(hass):
     entry = MockConfigEntry(
         domain=DOMAIN,

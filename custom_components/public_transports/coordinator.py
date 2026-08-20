@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import quote
 
@@ -32,6 +33,19 @@ def scalar(value):
     if isinstance(value, dict):
         return value.get("value")
     return value
+
+
+def spec_stop_codes(spec: dict) -> list[str]:
+    """Return the physical stop codes a spec reads from, single or pole.
+
+    A "pole" spec (several colocated PRIM stops merged into one sensor) carries
+    stop_codes (list); every other spec carries the legacy singular stop_code.
+    """
+    if spec.get("stop_codes"):
+        return spec["stop_codes"]
+    if spec.get("stop_code"):
+        return [spec["stop_code"]]
+    return []
 
 
 def entry_sense_specs(entry: ConfigEntry) -> list[dict]:
@@ -95,30 +109,45 @@ def build_siri_client(transit_info: dict, api_token: str | None, stop_code: str)
 
 
 class PublicTransportsDataUpdateCoordinator(DataUpdateCoordinator[list[MonitoredCall]]):
-    """Fetch the raw next passages for ONE stop code, via siri-lite.
+    """Fetch the raw next passages for one or more stop codes, via siri-lite.
 
     Deliberately unfiltered: a config entry may expose several sensors (both senses),
     each filtering this shared raw feed on its own line/direction. One coordinator is
-    created per distinct stop code (a "both senses" CTS entry has two codes, so two
-    coordinators; a PRIM entry has one code shared by both direction sensors).
+    created per distinct set of stop codes (a "both senses" CTS entry has two codes, so
+    two coordinators; a PRIM entry has one code shared by both direction sensors; a
+    "pole" PRIM entry merges several colocated codes into one coordinator).
     """
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, stop_code: str) -> None:
-        """Initialize the coordinator for one stop code."""
-        super().__init__(hass, _LOGGER, name=f"{DOMAIN}:{stop_code}", update_interval=DEFAULT_SCAN_INTERVAL)
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, stop_codes: list[str]) -> None:
+        """Initialize the coordinator for one or more stop codes."""
+        super().__init__(
+            hass, _LOGGER, name=f"{DOMAIN}:{'+'.join(stop_codes)}", update_interval=DEFAULT_SCAN_INTERVAL
+        )
         self.entry = entry
-        self.stop_code = stop_code
+        self.stop_codes = stop_codes
 
         transit_info = TRANSIT_COMPANIES[entry.data["transit_company"]]
-        self.siri_client = build_siri_client(
-            transit_info, entry.data.get("api_token"), stop_code
-        )
+        api_token = entry.data.get("api_token")
+        self.siri_clients = [
+            build_siri_client(transit_info, api_token, stop_code) for stop_code in stop_codes
+        ]
 
     async def _async_update_data(self) -> list[MonitoredCall]:
-        """Fetch the raw next calls for this stop code (filtering happens in the sensor)."""
+        """Fetch the raw next calls for every stop code and merge them.
+
+        Merged calls are sorted by expected_arrival_time so downstream code (sensor's
+        _calls[0] = next passage) keeps working unchanged whether reading one stop code
+        or several. Assumes a consistent timezone offset format across a pole's codes,
+        which holds for a single transit company's SIRI feed.
+        """
         try:
-            return await self.hass.async_add_executor_job(
-                self.siri_client.fetch_next_calls
-            )
+            results = await asyncio.gather(*[
+                self.hass.async_add_executor_job(client.fetch_next_calls)
+                for client in self.siri_clients
+            ])
         except RequestException as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
+
+        calls = [call for client_calls in results for call in client_calls]
+        calls.sort(key=lambda call: call.expected_arrival_time or "")
+        return calls

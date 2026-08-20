@@ -43,6 +43,13 @@
           "stop_id": "Arrêt"
         }
       },
+      "pole_confirm": {
+        "title": "Pôle multimodal",
+        "description": "Cet arrêt partage une zone de correspondance avec d'autres arrêts (ex. quais bus + métro de la même place). Les suivre tous dans un seul capteur, ou cet arrêt seul ?",
+        "data": {
+          "pole": "Choix"
+        }
+      },
       "select_line": {
         "title": "Ligne (facultatif)",
         "description": "Choisissez une ligne pour ne suivre que celle-ci, ou « Toutes les lignes » pour tout suivre.",

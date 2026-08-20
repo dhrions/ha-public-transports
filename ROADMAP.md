@@ -37,11 +37,13 @@ Feuille de route de **public_transports for Home Assistant**
 ## 🟡 Priorité moyenne
 
 ### Regroupement d'arrêts colocalisés
-- [ ] **Suivre en un seul capteur plusieurs arrêts d'un même pôle multimodal** (ex. bus et
+- [x] **Suivre en un seul capteur plusieurs arrêts d'un même pôle multimodal** (ex. bus et
   métro d'une même place), à partir de la zone de correspondance officielle IDFM
   (`zdcid`) plutôt que d'un rapprochement par nom — un nom similaire ne garantit pas la
   colocalisation (vérifié : deux arrêts « Châtelet » distincts peuvent être à l'autre
-  bout de Paris l'un de l'autre)
+  bout de Paris l'un de l'autre). PRIM uniquement (CTS n'a pas d'équivalent au `zdcid`) ;
+  opt-in à la configuration ; l'édition de la composition d'un pôle existant via Options
+  n'est pas prévue (recréer l'entrée).
 
 ### Couverture réseau
 - [ ] **Extension aux réseaux déjà annoncés mais non câblés** : TCL (Lyon), RTM

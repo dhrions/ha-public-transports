@@ -12,7 +12,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from siri_lite.models import MonitoredCall
 
 from .const import DOMAIN
-from .coordinator import PublicTransportsDataUpdateCoordinator, call_matches, entry_sense_specs, scalar
+from .coordinator import (
+    PublicTransportsDataUpdateCoordinator,
+    call_matches,
+    entry_sense_specs,
+    scalar,
+    spec_stop_codes,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +30,7 @@ async def async_setup_entry(
     coordinators = hass.data[DOMAIN][entry.entry_id]
     entities = []
     for index, spec in enumerate(entry_sense_specs(entry)):
-        coordinator = coordinators.get(spec.get("stop_code"))
+        coordinator = coordinators.get(tuple(spec_stop_codes(spec)))
         if coordinator is not None:
             entities.append(PublicTransportsSensor(coordinator, entry, spec, index))
     async_add_entities(entities)
@@ -98,6 +104,7 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         times = [c.extract_remaining_time_before_arrival(unit="minutes") for c in calls]
         return {
             "stop_code": self._spec.get("stop_code"),
+            "stop_codes": spec_stop_codes(self._spec),
             "line": scalar(call.line_ref),
             "published_line_name": scalar(call.published_line_name),
             "destination": scalar(call.destination_name),

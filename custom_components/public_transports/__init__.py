@@ -4,7 +4,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import PublicTransportsDataUpdateCoordinator, entry_sense_specs
+from .coordinator import PublicTransportsDataUpdateCoordinator, entry_sense_specs, spec_stop_codes
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,18 +51,21 @@ async def _async_update_listener(
 async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
     """Set up Public Transports from a config entry.
 
-    One coordinator per distinct stop code the entry needs (a "both senses" CTS entry has
-    two codes → two coordinators; a PRIM entry has one). Sensors pick their coordinator by
-    stop code and apply their own filter.
+    One coordinator per distinct set of stop codes the entry needs (a "both senses" CTS
+    entry has two codes → two coordinators; a PRIM entry has one; a "pole" PRIM entry
+    merges several colocated codes into one). Sensors pick their coordinator by that same
+    code set and apply their own filter.
     """
     hass.data.setdefault(DOMAIN, {})
 
-    stop_codes = {spec["stop_code"] for spec in entry_sense_specs(entry) if spec.get("stop_code")}
+    code_sets = {
+        tuple(spec_stop_codes(spec)) for spec in entry_sense_specs(entry) if spec_stop_codes(spec)
+    }
     coordinators = {}
-    for stop_code in stop_codes:
-        coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, stop_code)
+    for codes in code_sets:
+        coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, list(codes))
         await coordinator.async_config_entry_first_refresh()
-        coordinators[stop_code] = coordinator
+        coordinators[codes] = coordinator
 
     hass.data[DOMAIN][entry.entry_id] = coordinators
 

@@ -43,6 +43,13 @@
           "stop_id": "Stop"
         }
       },
+      "pole_confirm": {
+        "title": "Multimodal hub",
+        "description": "This stop shares a correspondence zone with other stops (ex. bus + metro platforms of the same place). Track them all as one sensor, or this stop only?",
+        "data": {
+          "pole": "Choice"
+        }
+      },
       "select_line": {
         "title": "Line (optional)",
         "description": "Choose a line to track only that one, or \"All lines\" to track them all.",

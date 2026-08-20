@@ -170,6 +170,8 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.direction_filter = None
         self.direction_label = None
         self.senses = []
+        self.pole_codes = None
+        self.pole_zones = []
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step where the user inputs a city name."""
@@ -349,6 +351,36 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def _query_idfm_zones(self, where, limit):
+        """Run a raw query against the public IDFM 'zones-d-arrets' referential.
+
+        Shared by fetch_idfm_zones (search by name) and fetch_idfm_zones_by_zdcid
+        (lookup pole siblings) — same public, unauthenticated dataset, only the filter
+        differs.
+        """
+        params = {"where": where, "limit": limit}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(IDFM_ZONES_API_URL, params=params) as response:
+                    if response.status != 200:
+                        _LOGGER.error(f"Failed to query IDFM zones: {response.status}")
+                        return []
+                    data = await response.json()
+        except aiohttp.ClientError as err:
+            _LOGGER.error(f"HTTP error occurred while querying IDFM zones: {err}")
+            return []
+
+        return [
+            {
+                "zdaid": result["zdaid"],
+                "zdaname": result["zdaname"],
+                "zdatown": result.get("zdatown", ""),
+                "zdatype": result.get("zdatype", ""),
+                "zdcid": result.get("zdcid"),
+            }
+            for result in data.get("results", [])
+        ]
+
     async def fetch_idfm_zones(self, query):
         """Search the public IDFM 'zones-d-arrets' referential by stop name.
 
@@ -358,27 +390,14 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         stoppoints-discovery, which IDFM does not expose on the PRIM product used here
         (see the discovery_backend comment in const.py).
         """
-        params = {"where": f'zdaname like "{query}"', "limit": 25}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(IDFM_ZONES_API_URL, params=params) as response:
-                    if response.status != 200:
-                        _LOGGER.error(f"Failed to search IDFM zones: {response.status}")
-                        return []
-                    data = await response.json()
-        except aiohttp.ClientError as err:
-            _LOGGER.error(f"HTTP error occurred while searching IDFM zones: {err}")
-            return []
+        return await self._query_idfm_zones(f'zdaname like "{query}"', 25)
 
-        return [
-            {
-                "zdaid": result["zdaid"],
-                "zdaname": result["zdaname"],
-                "zdatown": result.get("zdatown", ""),
-                "zdatype": result.get("zdatype", ""),
-            }
-            for result in data.get("results", [])
-        ]
+    async def fetch_idfm_zones_by_zdcid(self, zdcid):
+        """List every zone sharing a correspondence pole (zdcid) — the sibling stops of
+        a multimodal hub (ex. bus + metro platforms of the same place), for the pole
+        opt-in step. PRIM-only: zdcid has no CTS equivalent.
+        """
+        return await self._query_idfm_zones(f'zdcid="{zdcid}"', 25)
 
     async def async_step_get_stop_search(self, user_input=None):
         """Ask for a stop name to search, for companies using the idfm_zones backend."""
@@ -421,6 +440,14 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.stop_name = zone["zdaname"]
                 self.stop_code = f"STIF:StopArea:SP:{zdaid}:"
                 self.candidate_codes = [self.stop_code]
+
+                zdcid = zone.get("zdcid")
+                if zdcid:
+                    siblings = await self.fetch_idfm_zones_by_zdcid(zdcid)
+                    self.pole_zones = [z for z in siblings if z["zdaid"] != zdaid]
+                    if self.pole_zones:
+                        return await self.async_step_pole_confirm()
+
                 return await self.async_step_filters()
             errors["stop_id"] = "invalid_stop"
 
@@ -428,6 +455,31 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="get_stop_select",
             data_schema=vol.Schema({vol.Required("stop_id"): dropdown(options)}),
             errors=errors,
+        )
+
+    async def async_step_pole_confirm(self, user_input=None):
+        """Offer to merge this stop with the sibling stops of its multimodal hub
+        (same IDFM zdcid — ex. bus + metro platforms of the same place) into one sensor,
+        instead of tracking this single physical stop.
+        """
+        POLE_YES = "__pole_yes__"
+        POLE_NO = "__pole_no__"
+
+        if user_input is not None:
+            if user_input.get("pole") == POLE_YES:
+                sibling_codes = [f"STIF:StopArea:SP:{z['zdaid']}:" for z in self.pole_zones]
+                self.pole_codes = [self.stop_code] + sibling_codes
+                self.candidate_codes = self.pole_codes
+            return await self.async_step_filters()
+
+        names = ", ".join(z["zdaname"] for z in self.pole_zones)
+        options = {
+            POLE_YES: f"Oui, regrouper les {len(self.pole_zones) + 1} arrêts du pôle ({names})",
+            POLE_NO: "Non, cet arrêt seul",
+        }
+        return self.async_show_form(
+            step_id="pole_confirm",
+            data_schema=vol.Schema({vol.Required("pole", default=POLE_NO): dropdown(options)}),
         )
 
     async def async_step_filters(self, user_input=None):
@@ -528,22 +580,28 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options[code] = " / ".join(terminuses) if terminuses else code
         return options
 
-    def _spec(self, stop_code=None, direction_filter=None, direction_label=None):
+    def _spec(self, stop_code=None, direction_filter=None, direction_label=None, stop_codes=None):
         """Build one sense spec (= one future sensor) from the current flow state.
 
         stop_code falls back to the single candidate when not given explicitly — needed
         for a non-ambiguous CTS stop (one code), where self.stop_code is never assigned
         (only PRIM and the ambiguous-CTS branch set it directly). Without this fallback
         the spec silently got stop_code=None, and no sensor was ever created for it.
+
+        stop_codes (pole mode only) additionally lists every physical code the sensor
+        should merge — stop_code stays the primary/first one for display/back-compat.
         """
         stop_code = stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
-        return {
+        spec = {
             "stop_code": stop_code,
             "line_filter": self.line_filter,
             "line_name": self.line_name,
             "direction_filter": direction_filter,
             "direction_label": direction_label,
         }
+        if stop_codes:
+            spec["stop_codes"] = stop_codes
+        return spec
 
     async def async_step_select_direction(self, user_input=None):
         """Let the user pick a sense — one, or both (2 sensors).
@@ -557,7 +615,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         en circulation. Un sens -> 1 spec avec ce direction_filter ; « tous les sens » ->
         1 spec sans filtre (un seul capteur) ; « les deux sens » -> une spec par sens.
         """
-        if len(self.candidate_codes) > 1:
+        if len(self.candidate_codes) > 1 and not self.pole_codes:
             codes = self._codes_from_candidates()
 
             if len(codes) <= 1:
@@ -584,7 +642,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if len(senses) <= 1:
             direction_filter, direction_label = next(iter(senses.items())) if senses else (None, None)
-            self.senses = [self._spec(self.stop_code, direction_filter, direction_label)]
+            self.senses = [self._spec(self.stop_code, direction_filter, direction_label, self.pole_codes)]
             return self._create_entry()
 
         # Pas de "tous les sens" séparé : ça reviendrait au même que "les deux sens" (tout
@@ -594,9 +652,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("direction")
             if choice == BOTH_SENSES:
-                self.senses = [self._spec(self.stop_code, d, label) for d, label in senses.items()]
+                self.senses = [self._spec(self.stop_code, d, label, self.pole_codes) for d, label in senses.items()]
             else:
-                self.senses = [self._spec(self.stop_code, choice, senses.get(choice))]
+                self.senses = [self._spec(self.stop_code, choice, senses.get(choice), self.pole_codes)]
             return self._create_entry()
 
         return self.async_show_form(
@@ -615,7 +673,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.line_filter = line or None
             self.line_name = line or None
             code = self.stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
-            self.senses = [self._spec(code)]
+            self.senses = [self._spec(code, stop_codes=self.pole_codes)]
             return self._create_entry()
 
         return self.async_show_form(
