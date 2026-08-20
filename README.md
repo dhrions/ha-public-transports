@@ -1,4 +1,4 @@
-# 📚 public_transports for Home Assistant
+# 📚 Public Transports for Home Assistant
 
 > Intégration custom Home Assistant (HACS) affichant les prochains passages de transport
 > en commun à un arrêt configuré, via [siri-lite](https://pypi.org/project/siri-lite/).
@@ -16,7 +16,7 @@
   `custom_components` de Home Assistant (ou via HACS), redémarrer, puis ajouter
   l'intégration **Public Transports** depuis les paramètres.
 
-## Installation
+## 🔧 Installation
 
 1. Copier `custom_components/public_transports/` dans le dossier `custom_components/` de
    votre installation Home Assistant (ou installer via HACS en ajoutant ce dépôt comme
@@ -25,7 +25,7 @@
 3. Ajouter l'intégration **Public Transports** depuis *Paramètres → Appareils et
    services → Ajouter une intégration*.
 
-## Configuration
+## ⚙️ Configuration
 
 L'assistant de configuration guide en plusieurs étapes :
 
@@ -52,7 +52,7 @@ Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Opti
 
 Une entrée de configuration = un arrêt suivi (éventuellement restreint à une ligne / un sens).
 
-## Capteur
+## 📡 Capteur
 
 Chaque arrêt configuré crée un capteur `sensor.<nom_arrêt>_prochain_passage` :
 
@@ -75,13 +75,13 @@ tous les passages sont pris en compte. Le terminus précis de chaque rame reste 
 Le capteur est rafraîchi toutes les 60 secondes (intervalle fixe pour l'instant, non
 configurable via l'UI).
 
-## Dépendances
+## 📦 Dépendances
 
 Cette intégration s'appuie sur [`siri-lite`](https://pypi.org/project/siri-lite/)
 (`>=0.10.0`, publié sur PyPI) pour interroger l'API SIRI-lite *StopMonitoring* et récupérer
 les prochains passages. La découverte des arrêts (`stoppoints-discovery`, utilisée lors de
 la configuration) reste implémentée directement dans cette intégration.
 
-## Hors périmètre actuel
+## 🚧 Hors périmètre actuel
 
 - Intervalle de rafraîchissement configurable.
