@@ -6,8 +6,11 @@ DOMAIN = "public_transports"
 # partagé par plusieurs instances HA et par d'autres clients (extension GNOME, scripts).
 # Un coordinateur émet un appel PAR code d'arrêt et par cycle, donc une entrée « pôle »
 # à N quais ou « les deux sens » multiplie d'autant. À 60 s en continu, un seul arrêt
-# consommait déjà 1440 appels/jour — au-delà d'un quota courant de 1000/jour. D'où un
-# défaut à 2 min, restreint à une plage horaire active.
+# consommait déjà 1440 appels/jour, au-delà des 1000/jour du palier PRIM « nouvel
+# utilisateur » (jeton généré entre le 13/03 et sept. 2024 — cf. fiche officielle
+# https://prim.iledefrance-mobilites.fr/fr/apis/idfm-ivtr-requete_unitaire, section
+# « Accès à l'API », consultée le 2026-08-20 ; le débit associé, 5 req/s, n'est jamais
+# approché par ce coordinateur). D'où un défaut à 2 min, restreint à une plage active.
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=2)
 
 CONF_SCAN_INTERVAL = "scan_interval"

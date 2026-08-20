@@ -96,9 +96,14 @@ une entrée « les deux sens » (CTS) ou un pôle multimodal à N quais multipli
 | « Les deux sens » (CTS) | 2 | 2 880/jour | 780/jour |
 | Pôle à N quais | N | 1 440 × N | 390 × N |
 
-Avec un quota courant de 1 000 appels/jour, l'ancien défaut (60 s en continu) le dépassait
-donc **avec un seul arrêt**. Pour désactiver complètement la restriction horaire, mettre
-la même valeur en début et en fin de plage (ex. `00:00`/`00:00`).
+Pour PRIM (IDF Mobilités / RATP), le quota contractuel est de **1 000 requêtes/jour**
+pour un jeton généré entre le 13/03 et septembre 2024 (« nouvel utilisateur » — un jeton
+plus ancien monte à 1 000 000/jour) ; source :
+[fiche officielle de l'API](https://prim.iledefrance-mobilites.fr/fr/apis/idfm-ivtr-requete_unitaire),
+section « Accès à l'API », consultée le 2026-08-20. L'ancien défaut (60 s en continu) le
+dépassait donc **avec un seul arrêt PRIM**. Pas de chiffre équivalent trouvé pour CTS à ce
+jour. Pour désactiver complètement la restriction horaire, mettre la même valeur en début
+et en fin de plage (ex. `00:00`/`00:00`).
 
 ## 📦 Dépendances
 
