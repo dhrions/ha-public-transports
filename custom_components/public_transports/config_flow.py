@@ -38,6 +38,9 @@ ALL_LINES = "__all__"
 ALL_DIRECTIONS = "__all__"
 # Sentinelle « les deux sens » : crée une entrée qui expose 2 capteurs (un par sens).
 BOTH_SENSES = "__both__"
+# Sentinelle « une ligne par capteur » : crée une entrée qui expose un capteur par ligne
+# détectée à l'arrêt (sens fusionnés), pour un pôle multimodal (métro + bus + tram...).
+SPLIT_LINES = "__split__"
 
 # Traduction des zdatype du référentiel IDFM zones-d-arrets, pour désambiguïser les
 # arrêts homonymes (ex. "Gaîté" = une station de métro et un arrêt de bus distincts).
@@ -463,21 +466,44 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.line_name = None
             return await self.async_step_select_direction()
 
-        options = {ALL_LINES: "Toutes les lignes", **lines}
+        # Pas de "toutes les lignes" séparé : redondant avec "une ligne par capteur"
+        # (même résultat — tout suivre — juste fusionné en 1 capteur au lieu de N), même
+        # logique que le retrait de "tous les sens" au profit de "les deux sens".
+        options = dict(lines)
+        # "Une ligne par capteur" n'a de sens que si on peut fixer un stop_code unique —
+        # sur un arrêt CTS ambigu (plusieurs codes physiques), un capteur par ligne
+        # nécessiterait de lire plusieurs coordinators, pas supporté aujourd'hui.
+        splittable = len(self.candidate_codes) <= 1
+        if splittable:
+            options[SPLIT_LINES] = "Une ligne par capteur (toutes les lignes)"
 
         if user_input is not None:
             choice = user_input.get("line")
-            if choice and choice != ALL_LINES:
-                self.line_filter = choice
-                self.line_name = lines.get(choice)
-            else:
-                self.line_filter = None
-                self.line_name = None
+            if splittable and choice == SPLIT_LINES:
+                code = self.stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
+                self.senses = []
+                for ref, name in lines.items():
+                    self.line_filter, self.line_name = ref, name
+                    senses_for_line = _directions_from_calls(self.available_calls, ref)
+                    if len(senses_for_line) <= 1:
+                        # Une seule spec pour cette ligne (sens fusionné) — même repli
+                        # que partout ailleurs quand il n'y a qu'un choix réel.
+                        d_filter, d_label = next(iter(senses_for_line.items())) if senses_for_line else (None, None)
+                        self.senses.append(self._spec(code, d_filter, d_label))
+                    else:
+                        # Une spec par sens réel de cette ligne (ex. 2 sens RER par ligne).
+                        self.senses.extend(
+                            self._spec(code, d_filter, d_label)
+                            for d_filter, d_label in senses_for_line.items()
+                        )
+                return self._create_entry()
+            self.line_filter = choice
+            self.line_name = lines.get(choice)
             return await self.async_step_select_direction()
 
         return self.async_show_form(
             step_id="select_line",
-            data_schema=vol.Schema({vol.Required("line", default=ALL_LINES): dropdown(options)}),
+            data_schema=vol.Schema({vol.Required("line", default=next(iter(options))): dropdown(options)}),
         )
 
     def _codes_from_candidates(self):
@@ -502,8 +528,15 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options[code] = " / ".join(terminuses) if terminuses else code
         return options
 
-    def _spec(self, stop_code, direction_filter=None, direction_label=None):
-        """Build one sense spec (= one future sensor) from the current flow state."""
+    def _spec(self, stop_code=None, direction_filter=None, direction_label=None):
+        """Build one sense spec (= one future sensor) from the current flow state.
+
+        stop_code falls back to the single candidate when not given explicitly — needed
+        for a non-ambiguous CTS stop (one code), where self.stop_code is never assigned
+        (only PRIM and the ambiguous-CTS branch set it directly). Without this fallback
+        the spec silently got stop_code=None, and no sensor was ever created for it.
+        """
+        stop_code = stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
         return {
             "stop_code": stop_code,
             "line_filter": self.line_filter,
