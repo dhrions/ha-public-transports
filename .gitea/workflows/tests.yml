@@ -20,8 +20,16 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.test.txt
+          # venv dédié, pas le Python global du hostedtoolcache : sur le runner
+          # self-hosted, ce Python est partagé entre tous les dépôts du parc. Un job
+          # d'un autre dépôt (ex. siri-lite, `pip install -e ".[dev]"`) peut y enregistrer
+          # un paquet en editable pointant vers son propre workspace éphémère — une fois
+          # ce job terminé et son workspace nettoyé, l'import casse silencieusement pour
+          # tout job suivant qui réutilise ce même Python (symptôme observé : "Requirement
+          # already satisfied" au pip install, puis ModuleNotFoundError à l'import).
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -r requirements.test.txt
 
       - name: Tests
-        run: pytest tests/ -q
+        run: .venv/bin/pytest tests/ -q
