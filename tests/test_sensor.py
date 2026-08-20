@@ -6,6 +6,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from siri_lite.models import MonitoredCall
 
 from custom_components.public_transports.const import DOMAIN
+from custom_components.public_transports.sensor import PublicTransportsSensor
 
 ENTRY_DATA = {
     "city": "Strasbourg",
@@ -68,3 +69,22 @@ async def test_sensor_state_none_when_no_next_call(hass):
     state = hass.states.get("sensor.homme_de_fer_prochain_passage")
     assert state is not None
     assert state.state == "unknown"
+
+
+def test_build_name_includes_line_and_direction_when_filtered():
+    """A filtered sense spec must surface its line/direction in the sensor name."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    spec = {"line_name": "13", "direction_label": "Châtillon Montrouge"}
+
+    name = PublicTransportsSensor._build_name(entry, spec)
+
+    assert name == "Homme de Fer 13 → Châtillon Montrouge - prochain passage"
+
+
+def test_build_name_plain_when_unfiltered():
+    """A spec with no line/direction filter must keep the bare stop name."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+
+    name = PublicTransportsSensor._build_name(entry, {})
+
+    assert name == "Homme de Fer - prochain passage"

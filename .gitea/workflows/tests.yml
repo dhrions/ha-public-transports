@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # Ne PAS ajouter `cache: pip` : backend de cache injoignable depuis le runner
+          # self-hosted -> plusieurs minutes de timeouts.
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.test.txt
+
+      - name: Tests
+        run: pytest tests/ -q
