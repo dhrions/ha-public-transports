@@ -233,6 +233,20 @@ def test_within_active_window_equal_bounds_is_always_active():
     assert within_active_window(entry, datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc)) is True
 
 
+def test_within_active_window_applies_identically_on_weekends():
+    """The window is a time-of-day check only — no day-of-week restriction.
+
+    2026-08-22/23 are a Saturday/Sunday: same 07:00-20:00 window as any weekday.
+    """
+    entry = _entry_with_window("07:00", "20:00")
+    saturday_noon = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+    sunday_3am = datetime(2026, 8, 23, 3, 0, tzinfo=timezone.utc)
+    assert saturday_noon.weekday() == 5  # Saturday
+    assert sunday_3am.weekday() == 6  # Sunday
+    assert within_active_window(entry, saturday_noon) is True
+    assert within_active_window(entry, sunday_3am) is False
+
+
 def test_within_active_window_falls_back_on_garbage_bounds():
     """Unparseable bounds must not disable polling — they fall back to the default."""
     entry = _entry_with_window("nonsense", None)
