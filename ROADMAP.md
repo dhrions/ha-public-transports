@@ -24,9 +24,9 @@ Feuille de route de **public_transports for Home Assistant**
   recherchables pour la ville et l'arrêt
 - [x] **Token API non redemandé** : réutilisation silencieuse du token déjà saisi pour la
   même compagnie de transport
-- [ ] **Suivre plusieurs lignes d'un même arrêt sans réajouter l'intégration** : un capteur
-  par ligne détectée à l'arrêt, en une seule configuration — aujourd'hui disponible
-  uniquement pour un arrêt à code physique unique (PRIM, ou un nom CTS non ambigu)
+- [x] **Suivre plusieurs lignes d'un même arrêt sans réajouter l'intégration** : un capteur
+  par ligne (× sens) détectée à l'arrêt, en une seule configuration — limité aux arrêts à
+  code physique unique (PRIM, ou un nom CTS non ambigu ; un capteur ne lit qu'un stop_code)
 
 ### Richesse des données exposées
 - [x] **Accès direct aux horaires des prochains passages** sans parcourir une liste
