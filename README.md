@@ -78,8 +78,39 @@ les passages du sens choisi. Sans filtre, le nom reste `<nom_arrêt> - prochain 
 tous les passages sont pris en compte. Le terminus précis de chaque rame reste dans
 `next_passages`.
 
-Le capteur est rafraîchi toutes les 60 secondes (intervalle fixe pour l'instant, non
-configurable via l'UI).
+## ⏱️ Fréquence de rafraîchissement et quota d'API
+
+Par défaut, le capteur est rafraîchi **toutes les 60 secondes**, avec un **créneau de
+silence de 23:00 à 07:00** (heure locale de Home Assistant) : pendant ce créneau aucun
+appel n'est émis et la dernière valeur connue est conservée. Fréquence (de 1 s à 10 min)
+et créneau de silence sont modifiables : *Paramètres → Appareils et services → Public
+Transports →* menu ⋮ de l'entrée *→ Options*. Le formulaire affiche l'estimation du volume
+quotidien pour le réglage choisi et **refuse un réglage qui dépasserait le quota** effectif
+du jeton.
+
+⚠️ **Le quota d'API est compté par token, pas par intégration** : un même token peut
+alimenter plusieurs instances HA et d'autres clients. Et un appel est émis **par code
+d'arrêt et par cycle** — une entrée « les deux sens » (CTS) ou un pôle multimodal à N quais
+multiplie d'autant :
+
+| Configuration | Appels/cycle | 60 s, 24 h/24 | 60 s, silence 23:00–07:00 |
+|---|---|---|---|
+| 1 arrêt simple | 1 | 1 440/jour | 960/jour |
+| « Les deux sens » (CTS) | 2 | 2 880/jour | 1 920/jour |
+| Pôle à N quais | N | 1 440 × N | 960 × N |
+
+Pour PRIM (IDF Mobilités / RATP), le quota contractuel est de **1 000 requêtes/jour**
+pour un jeton généré entre le 13/03 et septembre 2024 (« nouvel utilisateur » — un jeton
+plus ancien monte à 1 000 000/jour) ; source :
+[fiche officielle de l'API](https://prim.iledefrance-mobilites.fr/fr/apis/idfm-ivtr-requete_unitaire),
+section « Accès à l'API », consultée le 2026-08-20. Le créneau de silence nocturne par
+défaut ramène un arrêt simple à 60 s sous ce palier. Pas de chiffre équivalent trouvé pour
+CTS à ce jour. Pour sonder en continu, mettre le même début et la même fin de créneau (ex.
+`00:00`/`00:00`).
+
+Un **capteur « quota API »** dédié (catégorie diagnostic) expose, quand le producteur le
+fournit dans ses en-têtes (cas de PRIM ; absent sur CTS), le quota quotidien restant du
+jeton et, en attribut `own_calls_today`, la part consommée par cette intégration seule.
 
 ## 📦 Dépendances
 

@@ -793,8 +793,10 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         if cur_scan_interval not in scan_interval_options:
             scan_interval_options[cur_scan_interval] = f"{cur_scan_interval} secondes"
 
-        cur_quiet = entry_quiet_hours(self.config_entry)
-        cur_quiet_start, cur_quiet_end = cur_quiet or ("", "")
+        # entry_quiet_hours renvoie le créneau nuit par défaut si l'entrée n'en a jamais
+        # défini — le formulaire le pré-remplit donc, et l'utilisateur peut l'effacer en
+        # mettant début == fin (sonde en continu).
+        cur_quiet_start, cur_quiet_end = entry_quiet_hours(self.config_entry)
 
         if user_input is not None:
             scan_interval = int(user_input.get("scan_interval", cur_scan_interval))

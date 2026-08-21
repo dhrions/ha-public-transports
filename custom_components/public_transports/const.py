@@ -2,12 +2,26 @@ from datetime import timedelta
 
 DOMAIN = "public_transports"
 
+# Le quota de l'API est compté par token, pas par intégration : un même token peut être
+# partagé par plusieurs instances HA et par d'autres clients (extension GNOME, scripts).
+# Un coordinateur émet un appel PAR code d'arrêt et par cycle, donc une entrée « pôle »
+# à N quais ou « les deux sens » multiplie d'autant. À 60 s en continu, un seul arrêt
+# consomme 1440 appels/jour, au-delà des 1000/jour du palier PRIM « nouvel utilisateur »
+# (jeton généré entre le 13/03 et sept. 2024 — cf. fiche officielle
+# https://prim.iledefrance-mobilites.fr/fr/apis/idfm-ivtr-requete_unitaire, section
+# « Accès à l'API », consultée le 2026-08-20 ; le débit associé, 5 req/s, n'est jamais
+# approché par ce coordinateur ; un jeton plus ancien monte à 1 000 000/jour).
+#
+# Deux garde-fous côté intégration : (1) le formulaire d'options affiche l'estimation du
+# volume quotidien induit et bloque l'enregistrement si elle dépasse le quota réel lu dans
+# les en-têtes de réponse (cf. coordinator.estimate_daily_calls / siri-lite RateLimitInfo) ;
+# (2) un créneau de silence nocturne par défaut (cf. DEFAULT_QUIET_*) ramène un arrêt simple
+# à 60 s sous le palier 1000/jour. Le défaut de fréquence reste 60 s : réactif, et le vrai
+# quota du jeton (lu en direct) est la référence, pas un palier codé en dur.
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=60)
 
 # Présets proposés pour la fréquence de rafraîchissement (en secondes), éditable par
-# l'utilisateur via les Options de l'entrée. Plancher à 1s (le formulaire affiche une
-# estimation du volume quotidien induit et bloque l'enregistrement si elle dépasse le
-# quota du producteur, cf. coordinator.estimate_daily_calls) ; un plafond de 10min reste
+# l'utilisateur via les Options de l'entrée. Plancher à 1s ; un plafond de 10min reste
 # utile pour un usage occasionnel.
 SCAN_INTERVAL_OPTIONS = {
     1: "1 seconde",
@@ -19,6 +33,19 @@ SCAN_INTERVAL_OPTIONS = {
     300: "5 minutes",
     600: "10 minutes",
 }
+
+# Bornes (en secondes) appliquées à la LECTURE de scan_interval, pas seulement à la
+# saisie : une valeur éditée à la main dans .storage (hors dropdown) ne peut donc pas
+# faire descendre l'intervalle sous 1s et marteler l'API.
+MIN_SCAN_INTERVAL_SECONDS = 1
+MAX_SCAN_INTERVAL_SECONDS = 600
+
+# Créneau de silence nocturne proposé par défaut (heure locale HA). Pendant ce créneau,
+# aucun appel n'est émis et la dernière donnée connue est conservée. 23:00→07:00 = 8h de
+# silence : à 60 s, un arrêt simple tombe à 16h × 60/h = 960 appels/jour, sous le palier
+# PRIM 1000/jour. Mettre début == fin (ex. 00:00/00:00) désactive le créneau (sonde 24/7).
+DEFAULT_QUIET_HOURS_START = "23:00:00"
+DEFAULT_QUIET_HOURS_END = "07:00:00"
 
 # Référentiel public IDFM des zones d'arrêt (StopArea), sans authentification.
 # zdaid <n> correspond directement au MonitoringRef SIRI STIF:StopArea:SP:<n>:

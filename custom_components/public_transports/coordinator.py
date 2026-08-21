@@ -17,7 +17,15 @@ from requests.exceptions import RequestException
 from siri_lite.models import MonitoredCall, RateLimitInfo
 from siri_lite.siri_client import SiriClient
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, TRANSIT_COMPANIES
+from .const import (
+    DEFAULT_QUIET_HOURS_END,
+    DEFAULT_QUIET_HOURS_START,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL_SECONDS,
+    MIN_SCAN_INTERVAL_SECONDS,
+    TRANSIT_COMPANIES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,29 +60,43 @@ def spec_stop_codes(spec: dict) -> list[str]:
 
 
 def entry_scan_interval(entry: ConfigEntry) -> timedelta:
-    """Return the entry's configured refresh interval, falling back to the default.
+    """Return the entry's configured refresh interval (seconds), falling back to default.
 
     Global to the entry (not per-sensor) — sensors of the same entry share a coordinator
     when they read the same stop codes, so a per-sensor interval would either be ignored
     or force splitting coordinators and multiplying API calls.
+
+    Clamped to [MIN, MAX]_SCAN_INTERVAL_SECONDS at read time, not only at form entry: a
+    value hand-edited in .storage (bypassing the dropdown) can't drive the interval below
+    1s and hammer the API. Unparseable values fall back to the default.
     """
     config = {**entry.data, **entry.options}
-    seconds = config.get("scan_interval")
-    if not seconds:
+    raw = config.get("scan_interval")
+    if not raw:
         return DEFAULT_SCAN_INTERVAL
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SCAN_INTERVAL
+    seconds = max(MIN_SCAN_INTERVAL_SECONDS, min(MAX_SCAN_INTERVAL_SECONDS, seconds))
     return timedelta(seconds=seconds)
 
 
-def entry_quiet_hours(entry: ConfigEntry) -> tuple[str, str] | None:
-    """Return the entry's configured quiet-hours window (start, end) as "HH:MM:SS"
-    strings, or None if unset. During this window the coordinator skips API calls
-    entirely (ex. la nuit) instead of merely reducing frequency.
+def entry_quiet_hours(entry: ConfigEntry) -> tuple[str, str]:
+    """Return the entry's quiet-hours window (start, end) as "HH:MM:SS" strings.
+
+    Falls back to the default night window (DEFAULT_QUIET_HOURS_*) for an entry that never
+    set one, so a freshly created entry is protected before the user ever opens Options
+    ("défaut sûr"). During this window the coordinator skips API calls entirely (ex. la
+    nuit) instead of merely reducing frequency. To poll around the clock, set start == end
+    in Options — _in_quiet_hours and _quiet_duration_seconds both read an equal-bounds
+    window as "no window".
     """
     config = {**entry.data, **entry.options}
     start = config.get("quiet_hours_start")
     end = config.get("quiet_hours_end")
     if not start or not end:
-        return None
+        return DEFAULT_QUIET_HOURS_START, DEFAULT_QUIET_HOURS_END
     return start, end
 
 
@@ -217,11 +239,13 @@ class PublicTransportsDataUpdateCoordinator(DataUpdateCoordinator[list[Monitored
         return self._call_count if self._call_count_date == dt_util.now().date() else 0
 
     def _in_quiet_hours(self) -> bool:
-        """Whether the entry's configured quiet-hours window covers the current time."""
-        quiet = entry_quiet_hours(self.entry)
-        if not quiet:
-            return False
-        start, end = time.fromisoformat(quiet[0]), time.fromisoformat(quiet[1])
+        """Whether the entry's quiet-hours window covers the current time.
+
+        entry_quiet_hours always returns a window (the default night one when unset), so
+        opting out is expressed by an equal-bounds window rather than by no window at all.
+        """
+        start_s, end_s = entry_quiet_hours(self.entry)
+        start, end = time.fromisoformat(start_s), time.fromisoformat(end_s)
         if start == end:
             return False
         now = dt_util.now().time()

@@ -14,6 +14,10 @@ ENTRY_DATA = {
     "api_token": "fake-token",
     "stop_name": "Homme de Fer",
     "stop_code": "43A",
+    # Créneau de silence dégénéré (début == fin) = jamais silencieux, pour que la mise en
+    # place du capteur ne dépende pas de l'heure d'exécution (créneau nuit par défaut).
+    "quiet_hours_start": "00:00:00",
+    "quiet_hours_end": "00:00:00",
 }
 
 

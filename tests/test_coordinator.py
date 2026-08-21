@@ -9,9 +9,17 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from requests.exceptions import RequestException
 from siri_lite.models import MonitoredCall, RateLimitInfo
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
-from custom_components.public_transports.const import DEFAULT_SCAN_INTERVAL, DOMAIN, TRANSIT_COMPANIES
+from custom_components.public_transports.const import (
+    DEFAULT_QUIET_HOURS_END,
+    DEFAULT_QUIET_HOURS_START,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL_SECONDS,
+    MIN_SCAN_INTERVAL_SECONDS,
+    TRANSIT_COMPANIES,
+)
 from custom_components.public_transports.coordinator import (
     PublicTransportsDataUpdateCoordinator,
     build_siri_client,
@@ -30,6 +38,11 @@ ENTRY_DATA = {
     "api_token": "fake-token",
     "stop_name": "Homme de Fer",
     "stop_code": "43A",
+    # Créneau de silence dégénéré (début == fin) = jamais silencieux. Sans cela, les tests
+    # qui appellent _async_update_data dépendraient de l'heure : le créneau nuit par défaut
+    # (23:00-07:00) les ferait sauter l'appel API et échouer s'ils tournaient la nuit.
+    "quiet_hours_start": "00:00:00",
+    "quiet_hours_end": "00:00:00",
 }
 
 
@@ -158,6 +171,28 @@ def test_entry_scan_interval_reads_from_data_when_no_options():
     assert entry_scan_interval(entry) == timedelta(seconds=120)
 
 
+@pytest.mark.parametrize(
+    ("stored", "expected_seconds"),
+    [
+        (0, None),  # 0 = falsy -> default, handled separately below
+        (-5, MIN_SCAN_INTERVAL_SECONDS),
+        (99999, MAX_SCAN_INTERVAL_SECONDS),
+    ],
+)
+def test_entry_scan_interval_clamps_out_of_range(stored, expected_seconds):
+    """A hand-edited .storage value (bypassing the dropdown) must not hammer the API."""
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, "scan_interval": stored})
+    if expected_seconds is None:
+        assert entry_scan_interval(entry) == DEFAULT_SCAN_INTERVAL
+    else:
+        assert entry_scan_interval(entry) == timedelta(seconds=expected_seconds)
+
+
+def test_entry_scan_interval_falls_back_on_unparseable_value():
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, "scan_interval": "abc"})
+    assert entry_scan_interval(entry) == DEFAULT_SCAN_INTERVAL
+
+
 def test_build_siri_client_uses_apikey_header_for_prim():
     """PRIM auth is a plain apiKey header, not Basic Auth."""
     transit_info = TRANSIT_COMPANIES["IDF Mobilités / RATP"]
@@ -253,14 +288,23 @@ def test_estimate_daily_calls_quiet_hours_same_start_end_ignored():
     assert estimate_daily_calls(60, 1, "08:00:00", "08:00:00") == estimate_daily_calls(60, 1)
 
 
-def test_entry_quiet_hours_none_when_unset():
-    entry = _make_entry()
-    assert entry_quiet_hours(entry) is None
+def test_entry_quiet_hours_defaults_when_unset():
+    """A fresh entry (no quiet keys) is protected by the default night window."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={k: v for k, v in ENTRY_DATA.items() if not k.startswith("quiet_hours")},
+    )
+    assert entry_quiet_hours(entry) == (DEFAULT_QUIET_HOURS_START, DEFAULT_QUIET_HOURS_END)
 
 
-def test_entry_quiet_hours_none_when_only_one_side_set():
-    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, "quiet_hours_start": "22:00:00"})
-    assert entry_quiet_hours(entry) is None
+def test_entry_quiet_hours_defaults_when_only_one_side_set():
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            k: v for k, v in ENTRY_DATA.items() if not k.startswith("quiet_hours")
+        } | {"quiet_hours_start": "22:00:00"},
+    )
+    assert entry_quiet_hours(entry) == (DEFAULT_QUIET_HOURS_START, DEFAULT_QUIET_HOURS_END)
 
 
 def test_entry_quiet_hours_reads_both_sides():
@@ -269,6 +313,15 @@ def test_entry_quiet_hours_reads_both_sides():
         data={**ENTRY_DATA, "quiet_hours_start": "22:00:00", "quiet_hours_end": "06:00:00"},
     )
     assert entry_quiet_hours(entry) == ("22:00:00", "06:00:00")
+
+
+def test_entry_quiet_hours_equal_bounds_opt_out_is_preserved():
+    """An explicit equal-bounds window (opt-out) must not be overridden by the default."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**ENTRY_DATA, "quiet_hours_start": "00:00:00", "quiet_hours_end": "00:00:00"},
+    )
+    assert entry_quiet_hours(entry) == ("00:00:00", "00:00:00")
 
 
 def test_entry_stop_code_count_sums_distinct_code_sets():
@@ -300,33 +353,85 @@ def test_entry_stop_code_count_dedupes_shared_code_set():
     assert entry_stop_code_count(entry) == 1
 
 
-async def test_update_data_skips_api_call_during_quiet_hours(hass):
+def _entry_with_quiet(hass, start, end):
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={**ENTRY_DATA, "quiet_hours_start": "00:00:00", "quiet_hours_end": "23:59:59"},
+        data={**ENTRY_DATA, "quiet_hours_start": start, "quiet_hours_end": end},
     )
     entry.add_to_hass(hass)
+    return entry
+
+
+async def test_update_data_skips_api_call_during_quiet_hours(hass):
+    """Frozen at 03:00, inside a 23:00-07:00 window: no HTTP call, last data re-served."""
+    entry = _entry_with_quiet(hass, "23:00:00", "07:00:00")
     coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
     coordinator.data = [MonitoredCall(stop_point_name="cached")]
 
-    with patch.object(hass, "async_add_executor_job", new=AsyncMock()) as mock_executor:
+    with (
+        patch(
+            "custom_components.public_transports.coordinator.dt_util.now",
+            return_value=datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc),
+        ),
+        patch.object(hass, "async_add_executor_job", new=AsyncMock()) as mock_executor,
+    ):
         result = await coordinator._async_update_data()
 
     mock_executor.assert_not_awaited()
     assert result == coordinator.data
 
 
+async def test_update_data_calls_api_outside_quiet_hours(hass):
+    """Frozen at noon, outside the 23:00-07:00 window: the API is called normally."""
+    entry = _entry_with_quiet(hass, "23:00:00", "07:00:00")
+    coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
+    expected = [MonitoredCall(stop_point_name="Homme de Fer")]
+
+    with (
+        patch(
+            "custom_components.public_transports.coordinator.dt_util.now",
+            return_value=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
+        ),
+        patch.object(hass, "async_add_executor_job", new=AsyncMock(return_value=expected)),
+    ):
+        result = await coordinator._async_update_data()
+
+    assert result == expected
+
+
 async def test_update_data_fetches_on_first_refresh_even_during_quiet_hours(hass):
     """self.data is still None before the first successful refresh — must not skip blindly."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={**ENTRY_DATA, "quiet_hours_start": "00:00:00", "quiet_hours_end": "23:59:59"},
-    )
-    entry.add_to_hass(hass)
+    entry = _entry_with_quiet(hass, "23:00:00", "07:00:00")
     coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
     assert coordinator.data is None
 
-    with patch.object(hass, "async_add_executor_job", new=AsyncMock(return_value=[])) as mock_executor:
+    with (
+        patch(
+            "custom_components.public_transports.coordinator.dt_util.now",
+            return_value=datetime(2026, 8, 20, 3, 0, tzinfo=timezone.utc),
+        ),
+        patch.object(hass, "async_add_executor_job", new=AsyncMock(return_value=[])) as mock_executor,
+    ):
         await coordinator._async_update_data()
 
     mock_executor.assert_awaited_once()
+
+
+def test_quiet_hours_are_time_of_day_only_no_weekday_restriction(hass):
+    """Quiet hours check the time of day, never the weekday — a weekend behaves like any
+    day. Locks the same intentional invariant the (dropped) active-window code had.
+    """
+    entry = _entry_with_quiet(hass, "23:00:00", "07:00:00")
+    coordinator = PublicTransportsDataUpdateCoordinator(hass, entry, ["43A"])
+    saturday_3am = datetime(2026, 8, 22, 3, 0, tzinfo=timezone.utc)
+    saturday_noon = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+    assert saturday_3am.weekday() == 5  # Saturday
+
+    with patch(
+        "custom_components.public_transports.coordinator.dt_util.now", return_value=saturday_3am
+    ):
+        assert coordinator._in_quiet_hours() is True  # 03:00 quiet, weekend included
+    with patch(
+        "custom_components.public_transports.coordinator.dt_util.now", return_value=saturday_noon
+    ):
+        assert coordinator._in_quiet_hours() is False  # noon active, weekend included
