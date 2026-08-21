@@ -2,13 +2,16 @@
 real bug was found live (stop_code fallback, sense/line splitting), not a full step walk.
 """
 
+from unittest.mock import patch
+
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-from siri_lite.models import MonitoredCall
+from siri_lite.models import MonitoredCall, RateLimitInfo
 
 from custom_components.public_transports.config_flow import (
     BOTH_SENSES,
     SPLIT_LINES,
     PublicTransportsConfigFlow,
+    PublicTransportsOptionsFlowHandler,
     _directions_from_calls,
     _lines_from_calls,
 )
@@ -303,3 +306,122 @@ def test_reused_token_returns_none_for_different_company(hass):
     flow.transit_company = "IDF Mobilités / RATP"
 
     assert flow._reused_token() is None
+
+
+OPTIONS_ENTRY_DATA = {
+    "city": "Strasbourg",
+    "transit_company": "Compagnie des Transports Strasbourgeois",
+    "api_token": "fake-token",
+    "stop_name": "Homme de Fer",
+    "senses": [{"stop_code": "43A"}],
+}
+
+
+def _options_flow(hass, entry):
+    flow = PublicTransportsOptionsFlowHandler(entry)
+    flow.hass = hass
+    return flow
+
+
+async def test_options_flow_shows_daily_estimate_on_first_render(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], RateLimitInfo(limit_day=1000000)),
+    ):
+        result = await flow.async_step_init()
+
+    assert result["type"] == "form"
+    assert "estimate" in result["description_placeholders"]
+    assert "1 000 000" in result["description_placeholders"]["limit_text"]
+
+
+async def test_options_flow_rejects_projection_exceeding_known_quota(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], RateLimitInfo(limit_day=100)),
+    ):
+        # 1 requête/seconde, 1 code -> 86 400/jour, largement au-dessus du quota de 100.
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "1"})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "quota_exceeded"
+
+
+async def test_options_flow_accepts_projection_within_known_quota(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], RateLimitInfo(limit_day=1000000)),
+    ):
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "60"})
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["scan_interval"] == 60
+
+
+async def test_options_flow_saves_without_quota_check_when_unknown(hass):
+    """CTS doesn't expose rate-limit headers — no limit_day means no comparison possible."""
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "1"})
+
+    assert result["type"] == "create_entry"
+
+
+async def test_options_flow_rejects_incomplete_quiet_hours(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({
+            "line": "__all__",
+            "direction": "__all__",
+            "scan_interval": "60",
+            "quiet_hours_start": "22:00:00",
+        })
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "quiet_hours_incomplete"
+
+
+async def test_options_flow_saves_valid_quiet_hours(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({
+            "line": "__all__",
+            "direction": "__all__",
+            "scan_interval": "60",
+            "quiet_hours_start": "22:00:00",
+            "quiet_hours_end": "06:00:00",
+        })
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["quiet_hours_start"] == "22:00:00"
+    assert result["data"]["quiet_hours_end"] == "06:00:00"

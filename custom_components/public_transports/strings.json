@@ -84,12 +84,19 @@
     "step": {
       "init": {
         "title": "Filtre ligne / sens",
-        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout.",
+        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
         "data": {
           "line": "Ligne",
-          "direction": "Sens"
+          "direction": "Sens",
+          "scan_interval": "Fréquence de rafraîchissement",
+          "quiet_hours_start": "Début du créneau de silence",
+          "quiet_hours_end": "Fin du créneau de silence"
         }
       }
+    },
+    "error": {
+      "quota_exceeded": "Cette fréquence impliquerait environ {estimate} requêtes/jour{limit_text} — au-delà du quota connu. Choisissez un intervalle plus long ou ajoutez un créneau de silence.",
+      "quiet_hours_incomplete": "Renseignez à la fois le début et la fin du créneau de silence, ou laissez les deux vides."
     }
   }
 }

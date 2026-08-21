@@ -6,27 +6,48 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     SelectOptionDict,
+    TimeSelector,
 )
 import aiohttp
 import logging
-from .const import DOMAIN, CITIES_DATA, TRANSIT_COMPANIES, IDFM_ZONES_API_URL, IDFM_LINES_API_URL
-from .coordinator import build_siri_client, entry_sense_specs, scalar
+from .const import (
+    DOMAIN,
+    CITIES_DATA,
+    TRANSIT_COMPANIES,
+    IDFM_ZONES_API_URL,
+    IDFM_LINES_API_URL,
+    SCAN_INTERVAL_OPTIONS,
+)
+from .coordinator import (
+    build_siri_client,
+    entry_quiet_hours,
+    entry_scan_interval,
+    entry_sense_specs,
+    entry_stop_code_count,
+    estimate_daily_calls,
+    scalar,
+)
 
 
-def dropdown(options):
-    """Build a searchable dropdown selector from an {value: label} mapping.
+def dropdown(options, mode=None):
+    """Build a searchable selector from an {value: label} mapping.
 
     Replaces vol.In(...) so long lists (cities, hundreds of CTS stops) get a search box
     instead of a radio list. Labels are passed inline, sidestepping translation of dynamic
     values (stop/line names).
+
+    mode defaults to DROPDOWN; pass SelectSelectorMode.COMBOBOX for a text input with
+    autocompletion.
     """
+    if mode is None:
+        mode = SelectSelectorMode.DROPDOWN
     return SelectSelector(
         SelectSelectorConfig(
             options=[
                 SelectOptionDict(value=str(value), label=str(label))
                 for value, label in options.items()
             ],
-            mode=SelectSelectorMode.DROPDOWN,
+            mode=mode,
         )
     )
 
@@ -57,16 +78,19 @@ async def probe_available_passages(hass, transit_company, api_token, stop_code):
     """Probe stop-monitoring once to discover the lines/directions serving a stop.
 
     Runs the sync siri-lite client (same path as the coordinator) in an executor, so the
-    config flow sees exactly the passages the sensor will. Returns [] on any error or when
-    nothing is currently circulating.
+    config flow sees exactly the passages the sensor will. Returns ([], None) on any error
+    or when nothing is currently circulating. The second element is the RateLimitInfo
+    reported by this same call (None if the producer doesn't expose it, ex. CTS) — reused
+    by the options flow to show/enforce a daily-quota estimate without an extra API call.
     """
     transit_info = TRANSIT_COMPANIES.get(transit_company, {})
     client = build_siri_client(transit_info, api_token, stop_code)
     try:
-        return await hass.async_add_executor_job(client.fetch_next_calls)
+        calls = await hass.async_add_executor_job(client.fetch_next_calls)
+        return calls, client.last_rate_limit
     except Exception as err:  # noqa: BLE001 - config flow must not crash on probe failure
         _LOGGER.error(f"Error probing stop for lines/directions: {err}")
-        return []
+        return [], None
 
 
 def _lines_from_calls(calls):
@@ -191,7 +215,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required("city"): dropdown({c: c for c in available_cities})
+                vol.Required("city"): dropdown({c: c for c in available_cities}, mode=SelectSelectorMode.COMBOBOX)
             }),
         )
 
@@ -491,7 +515,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         self.candidate_calls = []
         for code in self.candidate_codes:
-            calls = await probe_available_passages(
+            calls, _rate_limit = await probe_available_passages(
                 self.hass, self.transit_company, self.api_token, code
             )
             self.candidate_calls.extend((call, code) for call in calls)
@@ -713,17 +737,45 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, config_entry):
         """Initialize options flow."""
         self.config_entry = config_entry
+        self._probe_rate_limit = None
+
+    @staticmethod
+    def _format_count(value: int) -> str:
+        """1234567 -> "1 234 567" (espace insécable évitée : rendu HA simple)."""
+        return f"{value:,}".replace(",", " ")
+
+    def _estimate_placeholders(self, scan_interval: int, quiet_start: str | None, quiet_end: str | None):
+        """Build the description_placeholders shown on the form (and reused by the
+        quota_exceeded error, which HA substitutes with the same dict).
+        """
+        code_count = entry_stop_code_count(self.config_entry)
+        estimate = estimate_daily_calls(scan_interval, code_count, quiet_start, quiet_end)
+        limit_day = self._probe_rate_limit.limit_day if self._probe_rate_limit else None
+        limit_text = (
+            f" sur {self._format_count(limit_day)} disponibles"
+            if limit_day is not None
+            else " (quota inconnu pour ce producteur)"
+        )
+        return {
+            "estimate": self._format_count(estimate),
+            "limit_text": limit_text,
+        }, estimate, limit_day
 
     async def async_step_init(self, user_input=None):
-        """Re-probe the stop and edit the line (and, mono-sens, the direction) filter."""
+        """Re-probe the stop and edit the line/sens/fréquence/créneaux de silence."""
         data = self.config_entry.data
         specs = entry_sense_specs(self.config_entry)
         primary = specs[0]
         multi_sense = len(specs) > 1
 
-        calls = await probe_available_passages(
-            self.hass, data["transit_company"], data.get("api_token"), primary.get("stop_code")
-        )
+        try:
+            calls, self._probe_rate_limit = await probe_available_passages(
+                self.hass, data["transit_company"], data.get("api_token"), primary.get("stop_code")
+            )
+        except Exception as err:
+            _LOGGER.error(f"Error probing stop in options flow: {err}")
+            calls, self._probe_rate_limit = [], None
+
         lines = await resolve_line_names(self.hass, _lines_from_calls(calls))
         line_options = {ALL_LINES: "Toutes les lignes", **lines}
         cur_line = primary.get("line_filter") or ALL_LINES
@@ -736,7 +788,37 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         if cur_dir != ALL_DIRECTIONS and cur_dir not in dir_options:
             dir_options[cur_dir] = primary.get("direction_label") or cur_dir
 
+        cur_scan_interval = int(entry_scan_interval(self.config_entry).total_seconds())
+        scan_interval_options = dict(SCAN_INTERVAL_OPTIONS)
+        if cur_scan_interval not in scan_interval_options:
+            scan_interval_options[cur_scan_interval] = f"{cur_scan_interval} secondes"
+
+        cur_quiet = entry_quiet_hours(self.config_entry)
+        cur_quiet_start, cur_quiet_end = cur_quiet or ("", "")
+
         if user_input is not None:
+            scan_interval = int(user_input.get("scan_interval", cur_scan_interval))
+            quiet_start = (user_input.get("quiet_hours_start") or "").strip() or None
+            quiet_end = (user_input.get("quiet_hours_end") or "").strip() or None
+            errors = {}
+            if bool(quiet_start) != bool(quiet_end):
+                errors["base"] = "quiet_hours_incomplete"
+
+            placeholders, estimate, limit_day = self._estimate_placeholders(
+                scan_interval, quiet_start, quiet_end
+            )
+            if not errors and limit_day is not None and estimate > limit_day:
+                errors["base"] = "quota_exceeded"
+
+            if errors:
+                schema = self._build_schema(
+                    line_options, cur_line, dir_options, cur_dir, multi_sense,
+                    scan_interval_options, scan_interval, quiet_start or "", quiet_end or "",
+                )
+                return self.async_show_form(
+                    step_id="init", data_schema=schema, errors=errors, description_placeholders=placeholders
+                )
+
             line = user_input.get("line")
             line_filter = None if not line or line == ALL_LINES else line
             line_name = line_options.get(line) if line_filter else None
@@ -756,9 +838,42 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                     "direction_filter": direction_filter,
                     "direction_label": dir_options.get(direction) if direction_filter else None,
                 }]
-            return self.async_create_entry(title="", data={"senses": new_specs})
+            return self.async_create_entry(
+                title="",
+                data={
+                    "senses": new_specs,
+                    "scan_interval": scan_interval,
+                    "quiet_hours_start": quiet_start,
+                    "quiet_hours_end": quiet_end,
+                },
+            )
 
+        schema = self._build_schema(
+            line_options, cur_line, dir_options, cur_dir, multi_sense,
+            scan_interval_options, cur_scan_interval, cur_quiet_start, cur_quiet_end,
+        )
+        placeholders, _estimate, _limit_day = self._estimate_placeholders(
+            cur_scan_interval, cur_quiet_start or None, cur_quiet_end or None
+        )
+        return self.async_show_form(step_id="init", data_schema=schema, description_placeholders=placeholders)
+
+    @staticmethod
+    def _build_schema(
+        line_options, cur_line, dir_options, cur_dir, multi_sense,
+        scan_interval_options, cur_scan_interval, cur_quiet_start, cur_quiet_end,
+    ):
+        """Assemble the options form schema — shared by the first render and any
+        error re-render, so the user's already-typed values survive a rejection.
+        """
         schema = {vol.Required("line", default=cur_line): dropdown(line_options)}
         if not multi_sense:
             schema[vol.Required("direction", default=cur_dir)] = dropdown(dir_options)
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))
+        schema[vol.Required("scan_interval", default=cur_scan_interval)] = dropdown(scan_interval_options)
+        # Pas de default="" : TimeSelector rejette la chaîne vide à la validation (les
+        # deux champs doivent rester réellement absents tant qu'aucun créneau n'est
+        # configuré, pas "vides").
+        start_key = vol.Optional("quiet_hours_start", default=cur_quiet_start) if cur_quiet_start else vol.Optional("quiet_hours_start")
+        end_key = vol.Optional("quiet_hours_end", default=cur_quiet_end) if cur_quiet_end else vol.Optional("quiet_hours_end")
+        schema[start_key] = TimeSelector()
+        schema[end_key] = TimeSelector()
+        return vol.Schema(schema)

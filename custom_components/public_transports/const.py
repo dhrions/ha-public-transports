@@ -4,6 +4,22 @@ DOMAIN = "public_transports"
 
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=60)
 
+# Présets proposés pour la fréquence de rafraîchissement (en secondes), éditable par
+# l'utilisateur via les Options de l'entrée. Plancher à 1s (le formulaire affiche une
+# estimation du volume quotidien induit et bloque l'enregistrement si elle dépasse le
+# quota du producteur, cf. coordinator.estimate_daily_calls) ; un plafond de 10min reste
+# utile pour un usage occasionnel.
+SCAN_INTERVAL_OPTIONS = {
+    1: "1 seconde",
+    5: "5 secondes",
+    10: "10 secondes",
+    30: "30 secondes",
+    60: "1 minute",
+    120: "2 minutes",
+    300: "5 minutes",
+    600: "10 minutes",
+}
+
 # Référentiel public IDFM des zones d'arrêt (StopArea), sans authentification.
 # zdaid <n> correspond directement au MonitoringRef SIRI STIF:StopArea:SP:<n>:
 # (vérifié le 2026-08-19 : zdaid=45102 -> "Châtelet - Les Halles", cf. notes

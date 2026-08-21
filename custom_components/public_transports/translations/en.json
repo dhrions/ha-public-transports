@@ -84,12 +84,19 @@
     "step": {
       "init": {
         "title": "Line / direction filter",
-        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything.",
+        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything. Quiet hours (optional): no request is sent between these two times (ex. at night). Current frequency: about {estimate} requests/day{limit_text}.",
         "data": {
           "line": "Line",
-          "direction": "Direction"
+          "direction": "Direction",
+          "scan_interval": "Refresh frequency",
+          "quiet_hours_start": "Quiet hours start",
+          "quiet_hours_end": "Quiet hours end"
         }
       }
+    },
+    "error": {
+      "quota_exceeded": "This frequency would mean about {estimate} requests/day{limit_text} — above the known quota. Pick a longer interval or add quiet hours.",
+      "quiet_hours_incomplete": "Set both the start and end of the quiet-hours window, or leave both empty."
     }
   }
 }

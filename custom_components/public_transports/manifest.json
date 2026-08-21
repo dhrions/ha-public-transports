@@ -7,6 +7,6 @@
   "documentation": "https://github.com/dhrions/ha-public-transports",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/dhrions/ha-public-transports/issues",
-  "requirements": ["requests>=2.32", "siri-lite>=0.10.0"],
-  "version": "0.5.0"
+  "requirements": ["requests>=2.32", "siri-lite>=0.12.0"],
+  "version": "0.6.0"
 }
