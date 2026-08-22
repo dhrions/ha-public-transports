@@ -573,22 +573,25 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_select_direction()
 
         # "Toutes les lignes" reste toujours proposé (un seul capteur fourre-tout, sans filtre
-        # de ligne) à côté de "Une ligne par capteur" (ci-dessous) : ce sont deux intentions
-        # distinctes, pas redondantes. Bug corrigé le 2026-08-22 : une version antérieure
-        # supprimait ALL_LINES en le croyant redondant avec SPLIT_LINES, alors introuvable sur
-        # un pôle — ne laissant plus aucun moyen de suivre l'arrêt sans filtrer.
-        options = {ALL_LINES: "Toutes les lignes", **lines}
-        # « Une ligne par capteur » : un capteur (ou deux, un par sens) par ligne, au lieu
-        # d'un seul capteur fourre-tout suivant toutes les lignes ensemble. Disponible dès
-        # qu'on sait à quels codes physiques rattacher chaque capteur : un code unique, OU un
-        # pôle dont on connaît tous les codes — chaque capteur relit alors le flux fusionné du
-        # pôle (mêmes stop_codes, donc un seul coordinator, aucun appel API en plus) et se
-        # filtre sur sa propre ligne. Exclu du seul cas d'un arrêt CTS ambigu (plusieurs codes
-        # = les deux sens d'UNE ligne, pas plusieurs lignes) : « par ligne » n'y voudrait rien
-        # dire. Étendu aux pôles le 2026-08-22 (avant, seul un code unique était découpable).
+        # de ligne) à côté de "Toutes les lignes, un capteur par ligne" (ci-dessous) : ce sont
+        # deux intentions distinctes (fusionner vs séparer), pas redondantes — mais leurs
+        # libellés doivent le dire explicitement, pas juste répéter "toutes les lignes" sans
+        # préciser le mécanisme (confusion relevée en usage réel le 2026-08-22 : les deux
+        # options semblaient se chevaucher au premier coup d'œil dans le menu déroulant).
+        # Historique : une version antérieure avait même supprimé ALL_LINES en le croyant
+        # redondant avec SPLIT_LINES, alors introuvable sur un pôle — plus aucun moyen de
+        # suivre l'arrêt sans filtrer. D'où les deux options gardées, mais explicitées.
+        options = {ALL_LINES: "Toutes les lignes (1 capteur fusionné)", **lines}
+        # Disponible dès qu'on sait à quels codes physiques rattacher chaque capteur : un code
+        # unique, OU un pôle dont on connaît tous les codes — chaque capteur relit alors le
+        # flux fusionné du pôle (mêmes stop_codes, donc un seul coordinator, aucun appel API
+        # en plus) et se filtre sur sa propre ligne. Exclu du seul cas d'un arrêt CTS ambigu
+        # (plusieurs codes = les deux sens d'UNE ligne, pas plusieurs lignes) : « par ligne »
+        # n'y voudrait rien dire. Étendu aux pôles le 2026-08-22 (avant, seul un code unique
+        # était découpable).
         splittable = len(self.candidate_codes) <= 1 or bool(self.pole_codes)
         if splittable:
-            options[SPLIT_LINES] = "Une ligne par capteur (toutes les lignes)"
+            options[SPLIT_LINES] = "Toutes les lignes, un capteur par ligne"
 
         if user_input is not None:
             choice = user_input.get("line")

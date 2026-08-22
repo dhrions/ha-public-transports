@@ -52,7 +52,7 @@
       },
       "select_line": {
         "title": "Ligne (facultatif)",
-        "description": "Choisissez une ligne pour ne suivre que celle-ci, ou « Toutes les lignes » pour tout suivre.",
+        "description": "Choisissez une ligne pour ne suivre que celle-ci, ou suivez-les toutes : fusionnées dans un seul capteur (« Toutes les lignes (1 capteur fusionné) ») ou séparées avec un capteur par ligne (« Toutes les lignes, un capteur par ligne »).",
         "data": {
           "line": "Ligne"
         }
