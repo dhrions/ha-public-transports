@@ -29,15 +29,17 @@
 
 L'assistant de configuration guide en plusieurs étapes :
 
-1. **Ville** — parmi les villes ayant au moins une compagnie câblée (`Strasbourg`,
-   `Schiltigheim`, `Paris`).
+1. **Ville** — champ de recherche avec liste déroulante, parmi les villes ayant au moins
+   une compagnie câblée (`Strasbourg`, `Schiltigheim`, `Paris`).
 2. **Compagnie de transport** — CTS pour Strasbourg/Schiltigheim ; IDF Mobilités / RATP
    pour Paris.
 3. **Token API** — nécessaire dans tous les cas : un token CTS (Basic Auth) pour la CTS,
    ou une clé API PRIM (header `apiKey`, à obtenir sur
    [prim.iledefrance-mobilites.fr](https://prim.iledefrance-mobilites.fr/)) pour IDF
    Mobilités / RATP.
-4. **Arrêt** — sélection dans la liste des arrêts découverts pour la compagnie choisie.
+4. **Arrêt** — recherche par nom (ex. « Gaîté »), puis sélection dans la liste des
+   résultats : plusieurs arrêts physiques peuvent porter le même nom (bus/métro/tram
+   distingués, ex. « Gaîté — Paris 14e (métro) » vs « Gaîté — Clamart (bus) »).
    *(IDF Mobilités / RATP uniquement)* Si l'arrêt choisi appartient à un pôle multimodal
    (zone de correspondance IDFM `zdcid` partagée avec d'autres arrêts, ex. quais bus +
    métro d'une même place), une étape supplémentaire propose de **regrouper tout le pôle

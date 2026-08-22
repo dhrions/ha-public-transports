@@ -3,7 +3,84 @@
 Ce carnet consigne les pièges rencontrés en développant ce custom_component contre une
 vraie instance Home Assistant, pour ne pas les redécouvrir à chaque session.
 
-## Cible actuelle : hardy-hop
+## Cible actuelle : vivid-yam
+
+`vivid-yam` (Raspberry Pi 5, HAOS) sert désormais d'instance de test, en remplacement de
+`hardy-hop` — accessible uniquement via reverse proxy HTTPS
+(`https://homeassistant.rain.dhrions.fr`) avec un jeton longue durée. **Aucune route
+SSH/Samba/réseau direct** depuis les machines de dev (LAN distinct, `192.168.1.0/24`
+mais sur un site différent — `ping`/`ssh` vers l'IP LAN échouent en « No route to
+host »). Le jeton fonctionne sur `/api/` (Core) mais est **rejeté (401)** par
+`/api/hassio/` (Supervisor) — donc aucune installation/gestion d'add-on à distance
+possible avec ce jeton ; Samba, en particulier, ne peut pas être installé depuis une
+session Claude Code distante. Toute la section « Déploiement : Samba share » ci-dessous
+ne s'applique qu'à `hardy-hop`.
+
+Déploiement sur vivid-yam : uniquement via **HACS** (le dépôt est publié sur GitHub avec
+des releases taguées), pas de synchro fichier directe. Séquence fiable :
+
+1. **Publier une release GitHub taguée** (`gh release create vX.Y.Z --target master
+   --notes "..."`) — HACS suit les *releases*, pas les commits ; un push sans release
+   n'est jamais vu par HACS.
+2. **Forcer HACS à re-scanner** : `POST
+   /api/config/config_entries/entry/{hacs_entry_id}/reload` (trouver `hacs_entry_id` via
+   `GET /api/config/config_entries/entry`, filtrer `domain == "hacs"`). Un simple appel
+   à `update.install` peut échouer silencieusement si HACS a mis en cache « déjà à
+   jour ».
+3. **Installer la version ciblée explicitement** : service `update.install` sur
+   `update.public_transports_update` avec `{"version": "vX.Y.Z"}`, même si
+   `latest_version` affiche encore l'ancienne — HACS va chercher le tag à la demande.
+4. **Piège découvert (2026-08-22) : appeler `update.install` deux fois de suite sur LA
+   MÊME version cible ne réécrit PAS les fichiers sur disque** — HACS traite ça comme un
+   no-op silencieux, `installed_version` ne bouge pas. Pour forcer un vrai
+   réécrasement, faire un **cycle downgrade → upgrade** : installer une version
+   antérieure existante, attendre quelques secondes, puis réinstaller la version cible.
+   Signal fiable qu'un vrai changement de fichiers a eu lieu : l'attribut
+   `release_summary` de l'entité `update.*` passe à `<ha-alert
+   alert-type='error'>Restart of Home Assistant required</ha-alert>`.
+5. **Redémarrer Core pour de vrai.** Un redémarrage déclenché via l'API REST (service
+   `homeassistant.restart`) peut répondre vite/sans erreur sans avoir réellement cyclé
+   le process Python — piège rencontré : le nouveau code sur disque n'était pas repris
+   en mémoire malgré un appel API « réussi » (capteurs déjà en place restés visibles,
+   mais aucune nouvelle entité issue du nouveau code n'apparaissait). Le redémarrage
+   fiable a été `ha core restart` tapé par l'utilisateur en **session SSH interactive**
+   sur l'hôte (CLI Supervisor) — cohérent avec la restriction SSH documentée plus bas
+   pour hardy-hop (Claude Code n'a de toute façon aucun accès SSH à vivid-yam).
+
+### Diagnostiquer à distance sans accès SSH/filesystem
+
+- `GET /api/error_log` est **bloqué par le reverse proxy** (404), même si les autres
+  routes `/api/` répondent normalement — ne pas le confondre avec « endpoint
+  inexistant côté HA ». La vraie source de vérité pour un traceback reste le fichier de
+  log téléchargé depuis l'UI HA (*Paramètres → Système → Journaux → Télécharger le
+  journal complet*) — à demander explicitement à l'utilisateur, aucun contournement API
+  trouvé.
+- `POST /api/template` (Jinja2 évalué côté serveur) est très utile pour introspecter
+  l'état réel sans accès filesystem : `states | selectattr(...)`,
+  `integration_entities("domain")`, `config_entry_id('entity_id')`,
+  `device_attr(device_id, 'config_entries')`. Contrairement au filtrage manuel d'un
+  export JSON de `/api/states`, ça évite les faux négatifs de recherche (un mauvais
+  motif de filtre côté client peut faire croire qu'une entité est absente alors
+  qu'elle existe, cf. incident ci-dessous).
+- `/api/config/config_entries/entry` (non documenté officiellement dans la doc REST
+  HA, mais fonctionnel sur cette instance) liste les entrées avec `entry_id`/`domain`/
+  `state`, utile pour retrouver l'`entry_id` de HACS ou d'une entrée `public_transports`
+  sans passer par l'UI.
+- Piège de reproduction locale : les tests unitaires qui appellent une méthode de flow
+  HA **directement** (ex. `flow.async_step_init()` sur une instance construite à la
+  main) contournent le vrai `FlowManager`
+  (`hass.config_entries.options.async_init()`/`hass.config_entries.async_setup()`) et
+  peuvent donc rater des bugs qui n'apparaissent qu'en production sur une version HA
+  plus récente que la dépendance de test épinglée du dépôt. Deux bugs réels sont passés
+  entre les mailles ainsi le 2026-08-22 : une `property` HA dépréciée dont le *setter*
+  avait été carrément supprimé (`AttributeError` seulement en prod), et
+  `entity_category` qui doit être l'enum `EntityCategory.DIAGNOSTIC`, pas la chaîne
+  `"diagnostic"` (rejeté par `entity_registry.async_get_or_create` avec un `ValueError`
+  silencieux côté plateforme, sans remonter d'erreur au niveau de l'entrée). Pour un
+  test qui doit vraiment couvrir ce genre de régression, passer par le vrai
+  `FlowManager`/`entity_registry`, pas par un appel direct à la méthode.
+
+## Cible historique : hardy-hop
 
 `hardy-hop` (HAOS, Home Assistant Yellow) sert d'instance de test. Adresse actuelle :
 `192.168.1.14` (temporairement au site Maine — vérifier avant de copier des commandes,
