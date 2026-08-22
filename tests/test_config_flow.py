@@ -57,6 +57,22 @@ def test_directions_from_calls_groups_forked_line_terminuses_by_sense():
     }
 
 
+def test_directions_from_calls_caps_terminuses_in_label_beyond_the_limit():
+    """Merging across a whole multi-line pole (line_ref=None, ex. "Toutes les lignes")
+    can pack many unrelated lines' terminuses into the same sense — unreadable if joined
+    in full, as seen live (2026-08-22): a 6-terminus label on one line. Capped with a
+    "+N autres" suffix past the limit; unaffected below it (single forked line case).
+    """
+    calls = [
+        MonitoredCall(line_ref=f"L{i}", direction_ref="Aller", destination_name=name)
+        for i, name in enumerate(["Asnières", "Clamart", "Auteuil", "Champerret", "Saint-Denis", "Vanves"])
+    ]
+
+    senses = _directions_from_calls(calls)
+
+    assert senses["Aller"] == "Asnières / Auteuil / Champerret (+3 autres)"
+
+
 def test_directions_from_calls_ignores_calls_without_direction_ref():
     calls = [MonitoredCall(line_ref="C01383", published_line_name="13", destination_name="Asnières")]
     assert _directions_from_calls(calls) == {}

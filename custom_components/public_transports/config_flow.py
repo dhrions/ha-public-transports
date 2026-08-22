@@ -108,13 +108,19 @@ def _lines_from_calls(calls):
     return lines
 
 
+_MAX_TERMINUSES_IN_LABEL = 3
+
+
 def _directions_from_calls(calls, line_ref=None):
     """Group passages by real sense (SIRI DirectionRef), optionally within one line.
 
     Returns {direction_ref: label} where label is composed from the distinct terminuses
     seen for that sense (ex. "Asnières… / Saint-Denis…" vs "Châtillon Montrouge"). This is
     the 2-way sense the user picks — the per-vehicle terminus stays for the sensor display.
-    A forked line (ex. metro 13) has several terminuses per sense, hence the join.
+    A forked line (ex. metro 13) has several terminuses per sense, hence the join — capped
+    at _MAX_TERMINUSES_IN_LABEL with a "+N autres" suffix beyond that, since line_ref=None
+    (ex. "Toutes les lignes" on a multi-line pole) can merge dozens of unrelated lines'
+    terminuses into the same sense, unlike a single forked line's 2-3.
     """
     senses = {}
     for call in calls:
@@ -127,8 +133,15 @@ def _directions_from_calls(calls, line_ref=None):
         bucket = senses.setdefault(direction_ref, [])
         if terminus and terminus not in bucket:
             bucket.append(terminus)
+
+    def _label(direction_ref, terminuses):
+        shown = sorted(terminuses)[:_MAX_TERMINUSES_IN_LABEL]
+        extra = len(terminuses) - len(shown)
+        label = " / ".join(shown) or direction_ref
+        return f"{label} (+{extra} autres)" if extra > 0 else label
+
     return {
-        direction_ref: " / ".join(sorted(terminuses)) or direction_ref
+        direction_ref: _label(direction_ref, terminuses)
         for direction_ref, terminuses in senses.items()
     }
 
