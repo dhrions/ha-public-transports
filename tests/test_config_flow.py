@@ -4,10 +4,12 @@ real bug was found live (stop_code fallback, sense/line splitting), not a full s
 
 from unittest.mock import patch
 
+import voluptuous as vol
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from siri_lite.models import MonitoredCall, RateLimitInfo
 
 from custom_components.public_transports.config_flow import (
+    ALL_LINES,
     BOTH_SENSES,
     SPLIT_LINES,
     PublicTransportsConfigFlow,
@@ -137,6 +139,68 @@ async def test_select_line_split_lines_creates_one_spec_per_line_and_sense(hass)
     line_6_specs = [s for s in specs if s["line_filter"] == "C01384"]
     assert len(line_6_specs) == 1
     assert line_6_specs[0]["direction_filter"] == "Aller"
+
+
+async def test_select_line_all_lines_available_on_a_pole_where_split_lines_is_not(hass):
+    """A pole (several physical codes) can't offer SPLIT_LINES (needs a single stop_code)
+    — but must still offer ALL_LINES, or there is no way to track the pole unfiltered.
+    Reproduces the live bug (2026-08-22): Gaîté pole (5 lines) offered only single-line
+    choices, no "Toutes les lignes" and no "Une ligne par capteur".
+    """
+    flow = _flow(hass)
+    flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
+    flow.pole_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
+    flow.stop_code = "STIF:StopArea:SP:45102:"
+
+    result = await flow.async_step_select_line()
+
+    assert result["type"] == "form"
+    options = result["data_schema"].schema[vol.Required("line")].config["options"]
+    values = {opt["value"] for opt in options}
+    assert ALL_LINES in values
+    assert SPLIT_LINES not in values
+
+
+async def test_select_line_all_lines_creates_unfiltered_spec_on_a_pole(hass):
+    """CALLS_TWO_LINES_TWO_SENSES exposes 2 distinct senses once unfiltered across both
+    lines (Aller on both, Retour only on line 13) — choosing ALL_LINES proceeds to the
+    sense-selection form rather than auto-creating, same as any multi-sense stop.
+    """
+    flow = _flow(hass)
+    flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
+    flow.pole_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
+    flow.stop_code = "STIF:StopArea:SP:45102:"
+
+    line_result = await flow.async_step_select_line({"line": ALL_LINES})
+    assert flow.line_filter is None
+    assert line_result["type"] == "form"
+    assert line_result["step_id"] == "select_direction"
+
+    result = await flow.async_step_select_direction({"direction": BOTH_SENSES})
+
+    assert result["type"] == "create_entry"
+    specs = result["data"]["senses"]
+    assert len(specs) == 2
+    assert all(s["line_filter"] is None for s in specs)
+    assert {s["direction_filter"] for s in specs} == {"Aller", "Retour"}
+
+
+async def test_select_line_all_lines_still_available_on_a_splittable_stop(hass):
+    """ALL_LINES must stay available even where SPLIT_LINES also is (single stop_code) —
+    the two aren't mutually exclusive, just different ways to cover "everything".
+    """
+    flow = _flow(hass)
+    flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+
+    result = await flow.async_step_select_line()
+
+    options = result["data_schema"].schema[vol.Required("line")].config["options"]
+    values = {opt["value"] for opt in options}
+    assert ALL_LINES in values
+    assert SPLIT_LINES in values
 
 
 async def test_select_line_skips_form_when_only_one_line(hass):

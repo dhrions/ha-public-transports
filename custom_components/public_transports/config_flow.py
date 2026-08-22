@@ -559,19 +559,27 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.line_name = None
             return await self.async_step_select_direction()
 
-        # Pas de "toutes les lignes" séparé : redondant avec "une ligne par capteur"
-        # (même résultat — tout suivre — juste fusionné en 1 capteur au lieu de N), même
-        # logique que le retrait de "tous les sens" au profit de "les deux sens".
-        options = dict(lines)
+        # "Toutes les lignes" reste toujours proposé — un pôle multimodal (plusieurs codes
+        # physiques, ex. bus + métro) ne peut pas offrir "une ligne par capteur" (ci-dessous)
+        # mais doit quand même pouvoir suivre l'arrêt sans filtre de ligne, pas seulement
+        # ligne par ligne. Bug corrigé le 2026-08-22 : la version précédente supprimait
+        # ALL_LINES au profit de SPLIT_LINES en pensant les deux redondants, alors que
+        # SPLIT_LINES est indisponible sur un pôle — ne laissant alors plus aucun moyen de
+        # ne pas filtrer.
+        options = {ALL_LINES: "Toutes les lignes", **lines}
         # "Une ligne par capteur" n'a de sens que si on peut fixer un stop_code unique —
-        # sur un arrêt CTS ambigu (plusieurs codes physiques), un capteur par ligne
-        # nécessiterait de lire plusieurs coordinators, pas supporté aujourd'hui.
+        # sur un arrêt CTS ambigu ou un pôle (plusieurs codes physiques), un capteur par
+        # ligne nécessiterait de lire plusieurs coordinators, pas supporté aujourd'hui.
         splittable = len(self.candidate_codes) <= 1
         if splittable:
             options[SPLIT_LINES] = "Une ligne par capteur (toutes les lignes)"
 
         if user_input is not None:
             choice = user_input.get("line")
+            if choice == ALL_LINES:
+                self.line_filter = None
+                self.line_name = None
+                return await self.async_step_select_direction()
             if splittable and choice == SPLIT_LINES:
                 code = self.stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
                 self.senses = []
