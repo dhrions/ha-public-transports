@@ -735,8 +735,14 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
     """
 
     def __init__(self, config_entry):
-        """Initialize options flow."""
-        self.config_entry = config_entry
+        """Initialize options flow.
+
+        Writes the private `_config_entry` the base class reads, not the public
+        `config_entry` property: recent HA core dropped its setter entirely (still
+        present-but-deprecated in this repo's pinned test dependency), so assigning
+        through the property crashes in production while local tests stay green.
+        """
+        self._config_entry = config_entry
         self._probe_rate_limit = None
 
     @staticmethod

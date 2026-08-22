@@ -146,3 +146,21 @@ def test_quota_sensor_name_derives_from_stop_name():
     sensor = PublicTransportsQuotaSensor(entry, [_fake_coordinator()])
 
     assert sensor._attr_name == "Homme de Fer - quota API"
+
+
+def test_quota_sensor_entity_category_is_the_enum_not_a_string():
+    """entity_registry.async_get_or_create rejects a plain "diagnostic" string with a
+    hard ValueError — caught in production (2026-08-22) where it silently dropped the
+    quota sensor on every setup, without this local test suite ever detecting it (a bare
+    string didn't error against the Mock-based coordinators used above).
+
+    Checked on an instance, not the class: Entity's __init_subclass__ wraps a class-level
+    `_attr_entity_category = ...` assignment into a property descriptor, so comparing the
+    class attribute directly no longer yields the enum value in recent HA core.
+    """
+    from homeassistant.const import EntityCategory
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    sensor = PublicTransportsQuotaSensor(entry, [_fake_coordinator()])
+
+    assert sensor.entity_category is EntityCategory.DIAGNOSTIC

@@ -6,6 +6,7 @@ import logging
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -137,7 +138,7 @@ class PublicTransportsQuotaSensor(SensorEntity):
 
     _attr_icon = "mdi:gauge"
     _attr_should_poll = False
-    _attr_entity_category = "diagnostic"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self, entry: ConfigEntry, coordinators: list[PublicTransportsDataUpdateCoordinator]

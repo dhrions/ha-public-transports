@@ -425,3 +425,22 @@ async def test_options_flow_saves_valid_quiet_hours(hass):
     assert result["type"] == "create_entry"
     assert result["data"]["quiet_hours_start"] == "22:00:00"
     assert result["data"]["quiet_hours_end"] == "06:00:00"
+
+
+def test_options_flow_init_never_assigns_the_config_entry_property(hass):
+    """`self.config_entry = ...` crashes with an outright AttributeError on HA core
+    versions that dropped OptionsFlow.config_entry's setter entirely (observed in
+    production 2026-08-22 — every options-flow open 500'd). The repo's pinned test
+    dependency still carries the setter (deprecated-but-present), so this bug shipped
+    silently through the normal test suite; only removing the setter here, matching
+    where HA core is headed, reproduces it locally.
+    """
+    from homeassistant import config_entries as ha_config_entries
+
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+
+    with patch.object(ha_config_entries.OptionsFlow, "config_entry", property(lambda self: self._config_entry)):
+        flow = PublicTransportsOptionsFlowHandler(entry)
+
+    assert flow.config_entry is entry
