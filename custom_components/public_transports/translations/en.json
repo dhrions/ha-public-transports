@@ -52,7 +52,7 @@
       },
       "select_line": {
         "title": "Line (optional)",
-        "description": "Choose a line to track only that one, or track them all: merged into one sensor (\"All lines (1 merged sensor)\") or split with one sensor per line (\"All lines, one sensor per line\").",
+        "description": "Choose a line to track only that one, or \"All lines, one sensor per line\" to track them all without ever losing which line a sensor is about.",
         "data": {
           "line": "Line"
         }

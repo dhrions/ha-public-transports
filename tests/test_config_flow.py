@@ -157,11 +157,13 @@ async def test_select_line_split_lines_creates_one_spec_per_line_and_sense(hass)
     assert line_6_specs[0]["direction_filter"] == "Aller"
 
 
-async def test_select_line_offers_both_all_lines_and_split_on_a_pole(hass):
-    """A pole (several physical codes) must offer BOTH "Toutes les lignes" and "Une ligne
-    par capteur". Reproduces the live bug (2026-08-22): the Gaîté pole (5 lines) offered
-    only single-line choices, then a first fix restored ALL_LINES but still hid SPLIT_LINES
-    — a pole can split per line by having every spec reread the merged pole codes.
+async def test_select_line_offers_split_on_a_pole_but_never_a_merged_all_lines_choice(hass):
+    """A pole (several physical codes) must offer SPLIT_LINES ("une ligne par capteur").
+    Reproduces the live bug (2026-08-22): the Gaîté pole (5 lines) offered only
+    single-line choices, no way to cover the whole pole at all. ALL_LINES itself must
+    NEVER be offered anywhere (single stop or pole) — a sensor whose state mixes several
+    lines without saying which one is arriving has no practical use (user feedback,
+    2026-08-22): removed everywhere in favor of "one sensor per line".
     """
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
@@ -174,8 +176,8 @@ async def test_select_line_offers_both_all_lines_and_split_on_a_pole(hass):
     assert result["type"] == "form"
     options = result["data_schema"].schema[vol.Required("line")].config["options"]
     values = {opt["value"] for opt in options}
-    assert ALL_LINES in values
     assert SPLIT_LINES in values
+    assert ALL_LINES not in values
 
 
 async def test_select_line_split_lines_on_a_pole_reuses_merged_codes_per_line(hass):
@@ -203,10 +205,10 @@ async def test_select_line_split_lines_on_a_pole_reuses_merged_codes_per_line(ha
     assert len(line_6) == 1 and line_6[0]["direction_filter"] == "Aller"
 
 
-async def test_select_line_all_lines_creates_unfiltered_spec_on_a_pole(hass):
-    """CALLS_TWO_LINES_TWO_SENSES exposes 2 distinct senses once unfiltered across both
-    lines (Aller on both, Retour only on line 13) — choosing ALL_LINES proceeds to the
-    sense-selection form rather than auto-creating, same as any multi-sense stop.
+async def test_select_line_picking_one_line_still_works_on_a_pole(hass):
+    """Picking a specific real line (not the removed ALL_LINES, not SPLIT_LINES) must
+    still proceed to sense selection filtered on that one line, same as any multi-sense
+    stop — the ALL_LINES removal must not have broken this unrelated branch.
     """
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
@@ -214,8 +216,8 @@ async def test_select_line_all_lines_creates_unfiltered_spec_on_a_pole(hass):
     flow.pole_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
     flow.stop_code = "STIF:StopArea:SP:45102:"
 
-    line_result = await flow.async_step_select_line({"line": ALL_LINES})
-    assert flow.line_filter is None
+    line_result = await flow.async_step_select_line({"line": "C01383"})
+    assert flow.line_filter == "C01383"
     assert line_result["type"] == "form"
     assert line_result["step_id"] == "select_direction"
 
@@ -224,13 +226,14 @@ async def test_select_line_all_lines_creates_unfiltered_spec_on_a_pole(hass):
     assert result["type"] == "create_entry"
     specs = result["data"]["senses"]
     assert len(specs) == 2
-    assert all(s["line_filter"] is None for s in specs)
+    assert all(s["line_filter"] == "C01383" for s in specs)
     assert {s["direction_filter"] for s in specs} == {"Aller", "Retour"}
 
 
-async def test_select_line_all_lines_still_available_on_a_splittable_stop(hass):
-    """ALL_LINES must stay available even where SPLIT_LINES also is (single stop_code) —
-    the two aren't mutually exclusive, just different ways to cover "everything".
+async def test_select_line_defaults_to_split_lines_when_available(hass):
+    """No merged "all lines" option left to default to — SPLIT_LINES (the only choice
+    that still covers the whole stop without losing which line each sensor is about)
+    must be the pre-selected default whenever it's offered.
     """
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
@@ -240,8 +243,10 @@ async def test_select_line_all_lines_still_available_on_a_splittable_stop(hass):
 
     options = result["data_schema"].schema[vol.Required("line")].config["options"]
     values = {opt["value"] for opt in options}
-    assert ALL_LINES in values
     assert SPLIT_LINES in values
+    assert ALL_LINES not in values
+    line_key = next(k for k in result["data_schema"].schema if k == "line")
+    assert line_key.default() == SPLIT_LINES
 
 
 async def test_select_line_skips_form_when_only_one_line(hass):

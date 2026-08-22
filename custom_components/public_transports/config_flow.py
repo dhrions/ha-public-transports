@@ -572,16 +572,12 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.line_name = None
             return await self.async_step_select_direction()
 
-        # "Toutes les lignes" reste toujours proposé (un seul capteur fourre-tout, sans filtre
-        # de ligne) à côté de "Toutes les lignes, un capteur par ligne" (ci-dessous) : ce sont
-        # deux intentions distinctes (fusionner vs séparer), pas redondantes — mais leurs
-        # libellés doivent le dire explicitement, pas juste répéter "toutes les lignes" sans
-        # préciser le mécanisme (confusion relevée en usage réel le 2026-08-22 : les deux
-        # options semblaient se chevaucher au premier coup d'œil dans le menu déroulant).
-        # Historique : une version antérieure avait même supprimé ALL_LINES en le croyant
-        # redondant avec SPLIT_LINES, alors introuvable sur un pôle — plus aucun moyen de
-        # suivre l'arrêt sans filtrer. D'où les deux options gardées, mais explicitées.
-        options = {ALL_LINES: "Toutes les lignes (1 capteur fusionné)", **lines}
+        # Pas de choix "toutes les lignes fusionnées" : un capteur dont l'état (minutes avant
+        # le prochain passage) mélange plusieurs lignes sans dire laquelle arrive n'a aucune
+        # valeur pratique — retiré le 2026-08-22 sur retour utilisateur direct. Il ne reste
+        # que "une ligne précise" ou "toutes les lignes, un capteur par ligne" (ci-dessous) :
+        # dans les deux cas, chaque capteur sait toujours de quelle ligne il parle.
+        options = dict(lines)
         # Disponible dès qu'on sait à quels codes physiques rattacher chaque capteur : un code
         # unique, OU un pôle dont on connaît tous les codes — chaque capteur relit alors le
         # flux fusionné du pôle (mêmes stop_codes, donc un seul coordinator, aucun appel API
@@ -595,10 +591,6 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             choice = user_input.get("line")
-            if choice == ALL_LINES:
-                self.line_filter = None
-                self.line_name = None
-                return await self.async_step_select_direction()
             if splittable and choice == SPLIT_LINES:
                 self.senses = self._senses_split_by_line(lines)
                 return self._create_entry()
@@ -606,9 +598,12 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.line_name = lines.get(choice)
             return await self.async_step_select_direction()
 
+        # Par défaut sur "un capteur par ligne" quand elle est proposée : c'est la seule
+        # option qui couvre tout l'arrêt sans jamais perdre l'info de ligne.
+        default = SPLIT_LINES if splittable else next(iter(options))
         return self.async_show_form(
             step_id="select_line",
-            data_schema=vol.Schema({vol.Required("line", default=next(iter(options))): dropdown(options)}),
+            data_schema=vol.Schema({vol.Required("line", default=default): dropdown(options)}),
         )
 
     def _senses_split_by_line(self, lines):

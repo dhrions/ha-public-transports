@@ -8,5 +8,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/dhrions/ha-public-transports/issues",
   "requirements": ["requests>=2.32", "siri-lite>=0.12.0"],
-  "version": "0.6.8"
+  "version": "0.6.9"
 }
