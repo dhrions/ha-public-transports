@@ -199,6 +199,22 @@ def build_siri_client(transit_info: dict, api_token: str | None, stop_code: str)
     return SiriClient(url=url, headers=headers, auth=auth)
 
 
+def quota_key(transit_company: str) -> str:
+    """Key identifying which entries share one daily API quota.
+
+    The quota is enforced by the producer per (company, endpoint) — confirmed on PRIM,
+    whose stop-monitoring quota is separate from its other endpoints — not per config
+    entry. Several entries for the same company/stop-monitoring endpoint (ex. two PRIM
+    stops on the same token) must therefore report the SAME quota sensor rather than each
+    showing a near-duplicate reading of the same shared counter. Every TRANSIT_COMPANIES
+    entry has exactly one stop_monitoring_endpoint today, so this reduces in practice to
+    one key per company — modeled explicitly by endpoint so a second endpoint, if one is
+    ever added, naturally gets its own quota key instead of silently sharing this one.
+    """
+    endpoint = TRANSIT_COMPANIES.get(transit_company, {}).get("stop_monitoring_endpoint", "")
+    return f"{transit_company}::{endpoint}"
+
+
 class PublicTransportsDataUpdateCoordinator(DataUpdateCoordinator[list[MonitoredCall]]):
     """Fetch the raw next passages for one or more stop codes, via siri-lite.
 

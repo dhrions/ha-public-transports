@@ -17,6 +17,7 @@ from .coordinator import (
     PublicTransportsDataUpdateCoordinator,
     call_matches,
     entry_sense_specs,
+    quota_key,
     scalar,
     spec_stop_codes,
 )
@@ -27,8 +28,12 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up one sensor per sense spec of the entry (two for a "both senses" entry),
-    plus one shared quota sensor summarizing every coordinator of the entry.
+    """Set up one sensor per sense spec of the entry (two for a "both senses" entry).
+
+    Also creates the quota sensor for this entry's (company, endpoint) — but only the
+    first time that key is seen: several entries sharing one PRIM token would otherwise
+    each add a near-duplicate sensor reading the same producer-side counter. Tracked in
+    hass.data (not per-entry) since the quota is shared across entries, not owned by one.
     """
     coordinators = hass.data[DOMAIN][entry.entry_id]
     entities = []
@@ -36,8 +41,14 @@ async def async_setup_entry(
         coordinator = coordinators.get(tuple(spec_stop_codes(spec)))
         if coordinator is not None:
             entities.append(PublicTransportsSensor(coordinator, entry, spec, index))
-    if coordinators:
-        entities.append(PublicTransportsQuotaSensor(entry, list(coordinators.values())))
+
+    key = quota_key(entry.data["transit_company"])
+    keys_with_entity = hass.data[DOMAIN].setdefault("_quota_keys_with_entity", set())
+    if coordinators and key not in keys_with_entity:
+        entities.append(PublicTransportsQuotaSensor(hass, key, entry.data["transit_company"]))
+        keys_with_entity.add(key)
+        hass.data[DOMAIN].setdefault("_quota_owner_entry", {})[key] = entry.entry_id
+
     async_add_entities(entities)
 
 
@@ -128,34 +139,32 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
 
 
 class PublicTransportsQuotaSensor(SensorEntity):
-    """Daily API quota for this entry's token, plus this integration's own share of it.
+    """Daily API quota shared by every entry polling the same (company, endpoint) — cf.
+    quota_key — plus this integration's own share of it across all of them.
 
-    Not a CoordinatorEntity: an entry with several stop codes (both senses / pole) has
-    several coordinators, each polling with the same token — this sensor listens to all
-    of them and reports the most conservative quota reading plus the summed local call
-    count, rather than tying to a single coordinator.
+    Reads hass.data[DOMAIN]["_quota_coordinators"][key] live on every poll rather than a
+    fixed list captured at construction: that list is a shared, cross-entry registry that
+    keeps growing/shrinking as sibling entries (sharing the same token/company) set up or
+    unload, and this sensor must reflect all of them, not just the entry that happened to
+    create it. should_poll=True (default interval) instead of per-coordinator listeners,
+    since the underlying reads are cheap in-memory dict/list lookups, not network calls —
+    sidesteps having to re-subscribe listeners whenever a sibling entry joins or leaves.
     """
 
     _attr_icon = "mdi:gauge"
-    _attr_should_poll = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(
-        self, entry: ConfigEntry, coordinators: list[PublicTransportsDataUpdateCoordinator]
-    ) -> None:
-        """Initialize the quota sensor, listening to every coordinator of the entry."""
-        self._entry = entry
-        self._coordinators = coordinators
-        self._attr_unique_id = f"{entry.entry_id}_quota"
-        self._attr_name = f"{entry.data['stop_name']} - quota API"
+    def __init__(self, hass: HomeAssistant, key: str, transit_company: str) -> None:
+        """Initialize the quota sensor for one (company, endpoint) key."""
+        self._hass = hass
+        self._key = key
+        self._attr_unique_id = f"quota_{key}"
+        self._attr_name = f"{transit_company} - quota API"
 
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to every coordinator so the sensor updates on any of their refreshes."""
-        for coordinator in self._coordinators:
-            self.async_on_remove(coordinator.async_add_listener(self._handle_coordinator_update))
-
-    def _handle_coordinator_update(self) -> None:
-        self.async_write_ha_state()
+    @property
+    def _coordinators(self) -> list[PublicTransportsDataUpdateCoordinator]:
+        """Every coordinator currently sharing this quota key, across all entries."""
+        return self._hass.data[DOMAIN].get("_quota_coordinators", {}).get(self._key, [])
 
     @property
     def _rate_limits(self):

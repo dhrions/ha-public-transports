@@ -4,7 +4,12 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import PublicTransportsDataUpdateCoordinator, entry_sense_specs, spec_stop_codes
+from .coordinator import (
+    PublicTransportsDataUpdateCoordinator,
+    entry_sense_specs,
+    quota_key,
+    spec_stop_codes,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +62,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
     code set and apply their own filter.
     """
     hass.data.setdefault(DOMAIN, {})
+    # Registre partagé, transverse aux entrées : la quantité d'appels/jour est plafonnée
+    # par le producteur par (transporteur, endpoint) — cf. quota_key — pas par entrée. Deux
+    # entrées PRIM sur le même jeton doivent donc alimenter le MÊME quota, pas deux quotas
+    # indépendants qui liraient en double le même compteur côté producteur.
+    quota_coordinators = hass.data[DOMAIN].setdefault("_quota_coordinators", {})
 
     code_sets = {
         tuple(spec_stop_codes(spec)) for spec in entry_sense_specs(entry) if spec_stop_codes(spec)
@@ -68,6 +78,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         coordinators[codes] = coordinator
 
     hass.data[DOMAIN][entry.entry_id] = coordinators
+    key = quota_key(entry.data["transit_company"])
+    quota_coordinators.setdefault(key, []).extend(coordinators.values())
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -77,9 +89,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry.
+
+    Also detaches this entry's coordinators from the shared quota registry (cf.
+    async_setup_entry) and drops the "who owns the quota entity for this key" marker if
+    this entry was the owner — sensor.py's async_setup_entry reads that marker to decide
+    whether to (re-)create the entity, so on this same entry's next setup (reload after an
+    options change, or the user re-adding it) the quota entity is recreated fresh rather
+    than silently missing. If a DIFFERENT entry still sharing the key never reloads
+    afterward, its quota sensor stays "unavailable" (HA keeps the entity registered, it
+    doesn't vanish) until something does reload it — a known, accepted limitation rather
+    than a hidden bug (see quota_key's docstring).
+    """
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        entry_coordinators = hass.data[DOMAIN].pop(entry.entry_id, {})
+        key = quota_key(entry.data["transit_company"])
+        shared = hass.data[DOMAIN].get("_quota_coordinators", {}).get(key, [])
+        for coordinator in entry_coordinators.values():
+            if coordinator in shared:
+                shared.remove(coordinator)
+        owners = hass.data[DOMAIN].get("_quota_owner_entry", {})
+        if owners.get(key) == entry.entry_id:
+            owners.pop(key, None)
+            hass.data[DOMAIN].get("_quota_keys_with_entity", set()).discard(key)
     return unload_ok
 

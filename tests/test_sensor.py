@@ -94,6 +94,9 @@ def test_build_name_plain_when_unfiltered():
     assert name == "Homme de Fer - prochain passage"
 
 
+QUOTA_KEY = "IDF Mobilités / RATP::/stop-monitoring?MonitoringRef="
+
+
 def _fake_coordinator(rate_limit=None, call_count_today=0):
     coordinator = Mock()
     coordinator.last_rate_limit = rate_limit
@@ -101,54 +104,64 @@ def _fake_coordinator(rate_limit=None, call_count_today=0):
     return coordinator
 
 
-def test_quota_sensor_unavailable_without_any_rate_limit():
-    """CTS doesn't expose rate-limit headers — the sensor must not fake a zero quota."""
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
-    coordinators = [_fake_coordinator(rate_limit=None, call_count_today=3)]
+def _quota_sensor(hass, coordinators, key=QUOTA_KEY, transit_company="IDF Mobilités / RATP"):
+    """Build a quota sensor whose live registry read (cf. sensor.py) sees `coordinators`."""
+    hass.data.setdefault(DOMAIN, {}).setdefault("_quota_coordinators", {})[key] = coordinators
+    return PublicTransportsQuotaSensor(hass, key, transit_company)
 
-    sensor = PublicTransportsQuotaSensor(entry, coordinators)
+
+async def test_quota_sensor_unavailable_without_any_rate_limit(hass):
+    """CTS doesn't expose rate-limit headers — the sensor must not fake a zero quota."""
+    sensor = _quota_sensor(hass, [_fake_coordinator(rate_limit=None, call_count_today=3)])
 
     assert sensor.available is False
     assert sensor.native_value is None
 
 
-def test_quota_sensor_native_value_is_most_conservative_remaining_day():
+async def test_quota_sensor_native_value_is_most_conservative_remaining_day(hass):
     """A pole/both-senses entry has several coordinators sharing one token — the sensor
     must report the lowest remaining_day seen, never an average or a random pick."""
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
-    coordinators = [
+    sensor = _quota_sensor(hass, [
         _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=998100, limit_day=1000000)),
         _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=998099, limit_day=1000000)),
-    ]
-
-    sensor = PublicTransportsQuotaSensor(entry, coordinators)
+    ])
 
     assert sensor.available is True
     assert sensor.native_value == 998099
     assert sensor.extra_state_attributes["limit_day"] == 1000000
 
 
-def test_quota_sensor_own_calls_today_sums_across_coordinators():
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
-    coordinators = [
+async def test_quota_sensor_own_calls_today_sums_across_coordinators(hass):
+    sensor = _quota_sensor(hass, [
         _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=100), call_count_today=4),
         _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=100), call_count_today=6),
-    ]
-
-    sensor = PublicTransportsQuotaSensor(entry, coordinators)
+    ])
 
     assert sensor.extra_state_attributes["own_calls_today"] == 10
 
 
-def test_quota_sensor_name_derives_from_stop_name():
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+async def test_quota_sensor_reflects_coordinators_added_by_a_sibling_entry_later(hass):
+    """Two entries sharing the same (company, endpoint) key must show ONE shared quota —
+    a second entry's coordinator, registered after this sensor was constructed, must still
+    be picked up (live registry read, not a snapshot captured at construction).
+    """
+    sensor = _quota_sensor(hass, [_fake_coordinator(rate_limit=RateLimitInfo(remaining_day=500))])
+    assert sensor.native_value == 500
 
-    sensor = PublicTransportsQuotaSensor(entry, [_fake_coordinator()])
+    hass.data[DOMAIN]["_quota_coordinators"][QUOTA_KEY].append(
+        _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=100))
+    )
 
-    assert sensor._attr_name == "Homme de Fer - quota API"
+    assert sensor.native_value == 100
 
 
-def test_quota_sensor_entity_category_is_the_enum_not_a_string():
+async def test_quota_sensor_name_derives_from_transit_company(hass):
+    sensor = _quota_sensor(hass, [_fake_coordinator()])
+
+    assert sensor._attr_name == "IDF Mobilités / RATP - quota API"
+
+
+async def test_quota_sensor_entity_category_is_the_enum_not_a_string(hass):
     """entity_registry.async_get_or_create rejects a plain "diagnostic" string with a
     hard ValueError — caught in production (2026-08-22) where it silently dropped the
     quota sensor on every setup, without this local test suite ever detecting it (a bare
@@ -160,7 +173,6 @@ def test_quota_sensor_entity_category_is_the_enum_not_a_string():
     """
     from homeassistant.const import EntityCategory
 
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
-    sensor = PublicTransportsQuotaSensor(entry, [_fake_coordinator()])
+    sensor = _quota_sensor(hass, [_fake_coordinator()])
 
     assert sensor.entity_category is EntityCategory.DIAGNOSTIC

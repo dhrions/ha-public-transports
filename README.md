@@ -109,8 +109,12 @@ CTS à ce jour. Pour sonder en continu, mettre le même début et la même fin d
 `00:00`/`00:00`).
 
 Un **capteur « quota API »** dédié (catégorie diagnostic) expose, quand le producteur le
-fournit dans ses en-têtes (cas de PRIM ; absent sur CTS), le quota quotidien restant du
-jeton et, en attribut `own_calls_today`, la part consommée par cette intégration seule.
+fournit dans ses en-têtes (cas de PRIM ; absent sur CTS), le quota quotidien restant et,
+en attribut `own_calls_today`, la part consommée par cette intégration seule. Le quota est
+plafonné par le producteur **par transporteur et par endpoint** (confirmé sur PRIM), pas
+par entrée : plusieurs arrêts PRIM configurés avec le même jeton partagent donc **un seul**
+capteur (`IDF Mobilités / RATP - quota API`) plutôt que d'afficher chacun sa propre lecture
+du même compteur.
 
 ## 📦 Dépendances
 
