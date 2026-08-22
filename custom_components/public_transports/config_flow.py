@@ -29,15 +29,19 @@ from .coordinator import (
 )
 
 
-def dropdown(options, mode=None):
+def dropdown(options, mode=None, custom_value=False):
     """Build a searchable selector from an {value: label} mapping.
 
     Replaces vol.In(...) so long lists (cities, hundreds of CTS stops) get a search box
-    instead of a radio list. Labels are passed inline, sidestepping translation of dynamic
-    values (stop/line names).
+    instead of a radio list. Labels are passed inline, sidestepping translation of
+    dynamic values (stop/line names).
 
-    mode defaults to DROPDOWN; pass SelectSelectorMode.COMBOBOX for a text input with
-    autocompletion.
+    custom_value=True gives combobox-like behaviour on top of DROPDOWN — free-text entry
+    in addition to the suggested options — which is what a separate SelectSelectorMode
+    .COMBOBOX used to be called upon for. That member doesn't exist in this HA version
+    (nor in this repo's pinned test dependency, which has the same gap): calling it
+    crashed "Ajouter une entrée" outright with an AttributeError in production
+    2026-08-22, since HA moved this to a SelectSelectorConfig flag instead of a mode.
     """
     if mode is None:
         mode = SelectSelectorMode.DROPDOWN
@@ -48,6 +52,7 @@ def dropdown(options, mode=None):
                 for value, label in options.items()
             ],
             mode=mode,
+            custom_value=custom_value,
         )
     )
 
@@ -206,7 +211,16 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         if user_input is not None:
-            self.city = user_input.get("city")
+            city = user_input.get("city")
+            if city not in CITIES_DATA:
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=vol.Schema({
+                        vol.Required("city"): dropdown({c: c for c in available_cities}, custom_value=True)
+                    }),
+                    errors={"base": "invalid_city"},
+                )
+            self.city = city
             self.transit_companies = [
                 company for company in CITIES_DATA[self.city] if company in TRANSIT_COMPANIES
             ]
@@ -215,7 +229,10 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required("city"): dropdown({c: c for c in available_cities}, mode=SelectSelectorMode.COMBOBOX)
+                # custom_value=True : saisie libre en plus des suggestions (comportement
+                # combobox) — la ville tapée est validée ci-dessus, jamais utilisée telle
+                # quelle comme clé CITIES_DATA sans vérification.
+                vol.Required("city"): dropdown({c: c for c in available_cities}, custom_value=True)
             }),
         )
 

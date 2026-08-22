@@ -444,3 +444,35 @@ def test_options_flow_init_never_assigns_the_config_entry_property(hass):
         flow = PublicTransportsOptionsFlowHandler(entry)
 
     assert flow.config_entry is entry
+
+
+async def test_user_step_renders_via_the_real_flow_manager(hass):
+    """"Ajouter une entrée" crashed in production 2026-08-22 with an AttributeError on
+    SelectSelectorMode.COMBOBOX, a member that doesn't exist (this repo's pinned test
+    dependency doesn't have it either — cf. dropdown()'s docstring). Every prior test of
+    this step called PublicTransportsConfigFlow methods directly, which never serializes
+    the schema the way the real frontend does — going through
+    hass.config_entries.flow.async_init() is what actually exercises that serialization.
+    """
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "user"
+
+
+async def test_user_step_rejects_a_custom_value_not_in_cities_data(hass):
+    """The city field allows free-text entry (custom_value=True, restoring the old
+    COMBOBOX-style UX) — a typed city absent from CITIES_DATA must be rejected with the
+    existing invalid_city error, not KeyError on CITIES_DATA[self.city] downstream.
+    """
+    init = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+
+    result = await hass.config_entries.flow.async_configure(
+        init["flow_id"], {"city": "Nowhereville"}
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "user"
+    assert result["errors"]["base"] == "invalid_city"
