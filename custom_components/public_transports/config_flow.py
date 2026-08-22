@@ -920,6 +920,9 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         # configuré, pas "vides").
         start_key = vol.Optional("quiet_hours_start", default=cur_quiet_start) if cur_quiet_start else vol.Optional("quiet_hours_start")
         end_key = vol.Optional("quiet_hours_end", default=cur_quiet_end) if cur_quiet_end else vol.Optional("quiet_hours_end")
-        schema[start_key] = TimeSelector()
-        schema[end_key] = TimeSelector()
+        # vol.Any(None, TimeSelector()) : le bouton "X" du TimeSelector envoie une valeur
+        # explicite `null` (pas une absence de clé), donc vol.Optional seul ne protège pas
+        # — TimeSelector() valide en `str` en interne et rejette None avec "expected str".
+        schema[start_key] = vol.Any(None, TimeSelector())
+        schema[end_key] = vol.Any(None, TimeSelector())
         return vol.Schema(schema)
