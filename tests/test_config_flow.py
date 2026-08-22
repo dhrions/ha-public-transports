@@ -157,11 +157,11 @@ async def test_select_line_split_lines_creates_one_spec_per_line_and_sense(hass)
     assert line_6_specs[0]["direction_filter"] == "Aller"
 
 
-async def test_select_line_all_lines_available_on_a_pole_where_split_lines_is_not(hass):
-    """A pole (several physical codes) can't offer SPLIT_LINES (needs a single stop_code)
-    — but must still offer ALL_LINES, or there is no way to track the pole unfiltered.
-    Reproduces the live bug (2026-08-22): Gaîté pole (5 lines) offered only single-line
-    choices, no "Toutes les lignes" and no "Une ligne par capteur".
+async def test_select_line_offers_both_all_lines_and_split_on_a_pole(hass):
+    """A pole (several physical codes) must offer BOTH "Toutes les lignes" and "Une ligne
+    par capteur". Reproduces the live bug (2026-08-22): the Gaîté pole (5 lines) offered
+    only single-line choices, then a first fix restored ALL_LINES but still hid SPLIT_LINES
+    — a pole can split per line by having every spec reread the merged pole codes.
     """
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
@@ -175,7 +175,32 @@ async def test_select_line_all_lines_available_on_a_pole_where_split_lines_is_no
     options = result["data_schema"].schema[vol.Required("line")].config["options"]
     values = {opt["value"] for opt in options}
     assert ALL_LINES in values
-    assert SPLIT_LINES not in values
+    assert SPLIT_LINES in values
+
+
+async def test_select_line_split_lines_on_a_pole_reuses_merged_codes_per_line(hass):
+    """SPLIT_LINES on a pole must fan out per (line x sense) like a single stop, but every
+    spec rereads ALL the pole codes (stop_codes) and filters on its own line — so all specs
+    still share one coordinator (no extra API calls) while each line gets its own sensor(s).
+    Reproduces the user's ask (2026-08-22): "2 entités par ligne (1 par sens)" on a pole.
+    """
+    flow = _flow(hass)
+    flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
+    pole = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
+    flow.candidate_codes = list(pole)
+    flow.pole_codes = list(pole)
+    flow.stop_code = pole[0]
+
+    result = await flow.async_step_select_line({"line": SPLIT_LINES})
+
+    assert result["type"] == "create_entry"
+    specs = result["data"]["senses"]
+    assert len(specs) == 3  # line 13: 2 senses, line 6: 1 (merged)
+    # Every spec reads the whole pole (one shared coordinator), filtered per line.
+    assert all(s["stop_codes"] == pole for s in specs)
+    assert {s["direction_filter"] for s in specs if s["line_filter"] == "C01383"} == {"Aller", "Retour"}
+    line_6 = [s for s in specs if s["line_filter"] == "C01384"]
+    assert len(line_6) == 1 and line_6[0]["direction_filter"] == "Aller"
 
 
 async def test_select_line_all_lines_creates_unfiltered_spec_on_a_pole(hass):
