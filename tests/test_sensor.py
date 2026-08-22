@@ -161,6 +161,19 @@ async def test_quota_sensor_name_derives_from_transit_company(hass):
     assert sensor._attr_name == "IDF Mobilités / RATP - quota API"
 
 
+async def test_quota_sensor_has_a_measurement_state_class_for_a_real_history_graph(hass):
+    """Without state_class, HA renders the history dialog as a categorical colored-bar
+    timeline instead of a numeric line chart, for a plainly numeric quota value — reported
+    live 2026-08-22. MEASUREMENT (not TOTAL_INCREASING): the value drops through the day
+    and jumps back up at the producer's daily reset, not a monotonic counter.
+    """
+    from homeassistant.components.sensor import SensorStateClass
+
+    sensor = _quota_sensor(hass, [_fake_coordinator()])
+
+    assert sensor.state_class is SensorStateClass.MEASUREMENT
+
+
 async def test_quota_sensor_entity_category_is_the_enum_not_a_string(hass):
     """entity_registry.async_get_or_create rejects a plain "diagnostic" string with a
     hard ValueError — caught in production (2026-08-22) where it silently dropped the

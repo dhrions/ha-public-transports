@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -153,6 +153,11 @@ class PublicTransportsQuotaSensor(SensorEntity):
 
     _attr_icon = "mdi:gauge"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # MEASUREMENT (not TOTAL_INCREASING) : la valeur baisse au fil de la journée puis
+    # remonte au reset quotidien du producteur, pas un compteur monotone. Sans state_class,
+    # HA affiche l'historique en barres colorées catégorielles plutôt qu'un vrai graphique.
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "requêtes"
 
     def __init__(self, hass: HomeAssistant, key: str, transit_company: str) -> None:
         """Initialize the quota sensor for one (company, endpoint) key."""
