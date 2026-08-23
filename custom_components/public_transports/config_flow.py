@@ -826,6 +826,15 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         specs = entry_sense_specs(self.config_entry)
         primary = specs[0]
         multi_sense = len(specs) > 1
+        # Un entry multi-sens peut être soit « les deux sens d'UNE ligne » (2 specs, même
+        # line_filter — le cas historique que ce formulaire édite), soit « une ligne par
+        # capteur » sur un pôle (N specs, line_filter différent par spec). Les deux se
+        # distinguent uniquement par ce test : appliquer le choix de ligne du formulaire à
+        # toutes les specs, comme le fait la branche multi_sense ci-dessous, écraserait le
+        # filtre propre à chaque ligne dans le second cas — bug réel du 2026-08-23, où une
+        # simple validation du formulaire (même sans changer "Ligne") a rétamé les 9 capteurs
+        # d'un pôle en les filtrant tous sur la même ligne.
+        split_by_line = multi_sense and len({s.get("line_filter") for s in specs}) > 1
 
         try:
             calls, self._probe_rate_limit = await probe_available_passages(
@@ -873,32 +882,38 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
 
             if errors:
                 schema = self._build_schema(
-                    line_options, cur_line, dir_options, cur_dir, multi_sense,
+                    line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
                     scan_interval_options, scan_interval, quiet_start or "", quiet_end or "",
                 )
                 return self.async_show_form(
                     step_id="init", data_schema=schema, errors=errors, description_placeholders=placeholders
                 )
 
-            line = user_input.get("line")
-            line_filter = None if not line or line == ALL_LINES else line
-            line_name = line_options.get(line) if line_filter else None
-            if multi_sense:
-                # ligne appliquée aux 2 specs, sens conservés
-                new_specs = [
-                    {**spec, "line_filter": line_filter, "line_name": line_name}
-                    for spec in specs
-                ]
+            if split_by_line:
+                # Pas de champ "line" dans le schéma pour ce cas (cf. _build_schema) —
+                # chaque spec garde son propre line_filter/line_name, seuls
+                # scan_interval/quiet_hours sont éditables ici.
+                new_specs = specs
             else:
-                direction = user_input.get("direction")
-                direction_filter = None if not direction or direction == ALL_DIRECTIONS else direction
-                new_specs = [{
-                    **primary,
-                    "line_filter": line_filter,
-                    "line_name": line_name,
-                    "direction_filter": direction_filter,
-                    "direction_label": dir_options.get(direction) if direction_filter else None,
-                }]
+                line = user_input.get("line")
+                line_filter = None if not line or line == ALL_LINES else line
+                line_name = line_options.get(line) if line_filter else None
+                if multi_sense:
+                    # ligne appliquée aux 2 specs (les deux sens d'UNE même ligne), sens conservés
+                    new_specs = [
+                        {**spec, "line_filter": line_filter, "line_name": line_name}
+                        for spec in specs
+                    ]
+                else:
+                    direction = user_input.get("direction")
+                    direction_filter = None if not direction or direction == ALL_DIRECTIONS else direction
+                    new_specs = [{
+                        **primary,
+                        "line_filter": line_filter,
+                        "line_name": line_name,
+                        "direction_filter": direction_filter,
+                        "direction_label": dir_options.get(direction) if direction_filter else None,
+                    }]
             return self.async_create_entry(
                 title="",
                 data={
@@ -910,7 +925,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         schema = self._build_schema(
-            line_options, cur_line, dir_options, cur_dir, multi_sense,
+            line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
             scan_interval_options, cur_scan_interval, cur_quiet_start, cur_quiet_end,
         )
         placeholders, _estimate, _limit_day = self._estimate_placeholders(
@@ -920,13 +935,20 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
 
     @staticmethod
     def _build_schema(
-        line_options, cur_line, dir_options, cur_dir, multi_sense,
+        line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
         scan_interval_options, cur_scan_interval, cur_quiet_start, cur_quiet_end,
     ):
         """Assemble the options form schema — shared by the first render and any
         error re-render, so the user's already-typed values survive a rejection.
+
+        split_by_line (une entrée « un capteur par ligne » sur un pôle) n'a pas de champ
+        "line" éditable : chaque spec a délibérément sa propre ligne, et un unique
+        sélecteur ne peut représenter — ni écraser sans casse — cette diversité. Cf.
+        async_step_init pour l'incident que ça a causé le 2026-08-23.
         """
-        schema = {vol.Required("line", default=cur_line): dropdown(line_options)}
+        schema = {}
+        if not split_by_line:
+            schema[vol.Required("line", default=cur_line)] = dropdown(line_options)
         if not multi_sense:
             schema[vol.Required("direction", default=cur_dir)] = dropdown(dir_options)
         # default=str(...) : dropdown() stringifie ses clés d'options (SelectOptionDict

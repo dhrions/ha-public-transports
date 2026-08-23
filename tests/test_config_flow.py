@@ -537,6 +537,57 @@ async def test_options_flow_saves_valid_quiet_hours(hass):
     assert result["data"]["quiet_hours_end"] == "06:00:00"
 
 
+SPLIT_BY_LINE_ENTRY_DATA = {
+    "city": "Paris",
+    "transit_company": "IDF Mobilités / RATP",
+    "api_token": "fake-token",
+    "stop_name": "Gaîté",
+    "senses": [
+        {"stop_code": "43046", "stop_codes": ["43046", "59070", "463915"], "line_filter": "C01383", "line_name": "13"},
+        {"stop_code": "43046", "stop_codes": ["43046", "59070", "463915"], "line_filter": "C01120", "line_name": "58"},
+        {"stop_code": "43046", "stop_codes": ["43046", "59070", "463915"], "line_filter": "C02245", "line_name": "59"},
+    ],
+}
+
+
+async def test_options_flow_split_by_line_has_no_line_field():
+    """A "one sensor per line" pole entry can't offer a single "line" dropdown — there's
+    no one value to show, and submitting any would apply it to every spec (see the next
+    test for the incident this used to cause).
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=SPLIT_BY_LINE_ENTRY_DATA)
+    flow = PublicTransportsOptionsFlowHandler(entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init()
+
+    assert result["type"] == "form"
+    assert "line" not in result["data_schema"].schema
+
+
+async def test_options_flow_split_by_line_preserves_each_specs_own_line_filter(hass):
+    """Incident 2026-08-23: submitting this form (even just to change scan_interval) used
+    to overwrite every spec's line_filter with whatever the (single, now-removed) "line"
+    dropdown showed — collapsing a 3-line pole entry down to one line across all sensors.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=SPLIT_BY_LINE_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({"scan_interval": "60"})
+
+    assert result["type"] == "create_entry"
+    saved_line_filters = [spec["line_filter"] for spec in result["data"]["senses"]]
+    assert saved_line_filters == ["C01383", "C01120", "C02245"]
+
+
 def test_options_flow_init_never_assigns_the_config_entry_property(hass):
     """`self.config_entry = ...` crashes with an outright AttributeError on HA core
     versions that dropped OptionsFlow.config_entry's setter entirely (observed in
