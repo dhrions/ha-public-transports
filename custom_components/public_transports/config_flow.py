@@ -929,7 +929,11 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         schema = {vol.Required("line", default=cur_line): dropdown(line_options)}
         if not multi_sense:
             schema[vol.Required("direction", default=cur_dir)] = dropdown(dir_options)
-        schema[vol.Required("scan_interval", default=cur_scan_interval)] = dropdown(scan_interval_options)
+        # default=str(...) : dropdown() stringifie ses clés d'options (SelectOptionDict
+        # exige value=str) ; un champ non touché par l'utilisateur renvoie ce default tel
+        # quel à la soumission — un int ici ferait échouer la validation avec "expected
+        # str", peu importe si les créneaux horaires sont eux corrects.
+        schema[vol.Required("scan_interval", default=str(cur_scan_interval))] = dropdown(scan_interval_options)
         # Pas de default="" : TimeSelector rejette la chaîne vide à la validation (les
         # deux champs doivent rester réellement absents tant qu'aucun créneau n'est
         # configuré, pas "vides").
