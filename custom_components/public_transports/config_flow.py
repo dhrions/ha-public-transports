@@ -572,53 +572,68 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.line_name = None
             return await self.async_step_select_direction()
 
-        # "Toutes les lignes" reste toujours proposé — un pôle multimodal (plusieurs codes
-        # physiques, ex. bus + métro) ne peut pas offrir "une ligne par capteur" (ci-dessous)
-        # mais doit quand même pouvoir suivre l'arrêt sans filtre de ligne, pas seulement
-        # ligne par ligne. Bug corrigé le 2026-08-22 : la version précédente supprimait
-        # ALL_LINES au profit de SPLIT_LINES en pensant les deux redondants, alors que
-        # SPLIT_LINES est indisponible sur un pôle — ne laissant alors plus aucun moyen de
-        # ne pas filtrer.
-        options = {ALL_LINES: "Toutes les lignes", **lines}
-        # "Une ligne par capteur" n'a de sens que si on peut fixer un stop_code unique —
-        # sur un arrêt CTS ambigu ou un pôle (plusieurs codes physiques), un capteur par
-        # ligne nécessiterait de lire plusieurs coordinators, pas supporté aujourd'hui.
-        splittable = len(self.candidate_codes) <= 1
+        # Pas de choix "toutes les lignes fusionnées" : un capteur dont l'état (minutes avant
+        # le prochain passage) mélange plusieurs lignes sans dire laquelle arrive n'a aucune
+        # valeur pratique — retiré le 2026-08-22 sur retour utilisateur direct. Il ne reste
+        # que "une ligne précise" ou "toutes les lignes, un capteur par ligne" (ci-dessous) :
+        # dans les deux cas, chaque capteur sait toujours de quelle ligne il parle.
+        options = dict(lines)
+        # Disponible dès qu'on sait à quels codes physiques rattacher chaque capteur : un code
+        # unique, OU un pôle dont on connaît tous les codes — chaque capteur relit alors le
+        # flux fusionné du pôle (mêmes stop_codes, donc un seul coordinator, aucun appel API
+        # en plus) et se filtre sur sa propre ligne. Exclu du seul cas d'un arrêt CTS ambigu
+        # (plusieurs codes = les deux sens d'UNE ligne, pas plusieurs lignes) : « par ligne »
+        # n'y voudrait rien dire. Étendu aux pôles le 2026-08-22 (avant, seul un code unique
+        # était découpable).
+        splittable = len(self.candidate_codes) <= 1 or bool(self.pole_codes)
         if splittable:
-            options[SPLIT_LINES] = "Une ligne par capteur (toutes les lignes)"
+            options[SPLIT_LINES] = "Toutes les lignes, un capteur par ligne"
 
         if user_input is not None:
             choice = user_input.get("line")
-            if choice == ALL_LINES:
-                self.line_filter = None
-                self.line_name = None
-                return await self.async_step_select_direction()
             if splittable and choice == SPLIT_LINES:
-                code = self.stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
-                self.senses = []
-                for ref, name in lines.items():
-                    self.line_filter, self.line_name = ref, name
-                    senses_for_line = _directions_from_calls(self.available_calls, ref)
-                    if len(senses_for_line) <= 1:
-                        # Une seule spec pour cette ligne (sens fusionné) — même repli
-                        # que partout ailleurs quand il n'y a qu'un choix réel.
-                        d_filter, d_label = next(iter(senses_for_line.items())) if senses_for_line else (None, None)
-                        self.senses.append(self._spec(code, d_filter, d_label))
-                    else:
-                        # Une spec par sens réel de cette ligne (ex. 2 sens RER par ligne).
-                        self.senses.extend(
-                            self._spec(code, d_filter, d_label)
-                            for d_filter, d_label in senses_for_line.items()
-                        )
+                self.senses = self._senses_split_by_line(lines)
                 return self._create_entry()
             self.line_filter = choice
             self.line_name = lines.get(choice)
             return await self.async_step_select_direction()
 
+        # Par défaut sur "un capteur par ligne" quand elle est proposée : c'est la seule
+        # option qui couvre tout l'arrêt sans jamais perdre l'info de ligne.
+        default = SPLIT_LINES if splittable else next(iter(options))
         return self.async_show_form(
             step_id="select_line",
-            data_schema=vol.Schema({vol.Required("line", default=next(iter(options))): dropdown(options)}),
+            data_schema=vol.Schema({vol.Required("line", default=default): dropdown(options)}),
         )
+
+    def _senses_split_by_line(self, lines):
+        """Build one sense spec per (line × real sense) — the « une ligne par capteur » choice.
+
+        Works both for a single-code stop and for a multimodal pole: on a pole every spec
+        reads the SAME merged set of pole codes (self.pole_codes) and filters on its own
+        line, so all specs still share one coordinator (no extra API calls) while each line
+        gets its own sensor(s). A forked/2-way line yields two specs (one per DirectionRef),
+        a single-sense line yields one — same "collapse when only one real choice" rule used
+        everywhere else. Mutates self.line_filter/line_name per line (read by _spec).
+        """
+        if self.pole_codes:
+            primary, codes = self.pole_codes[0], self.pole_codes
+        else:
+            primary = self.stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
+            codes = None
+        senses = []
+        for ref, name in lines.items():
+            self.line_filter, self.line_name = ref, name
+            per_line = _directions_from_calls(self.available_calls, ref)
+            if len(per_line) <= 1:
+                d_filter, d_label = next(iter(per_line.items())) if per_line else (None, None)
+                senses.append(self._spec(primary, d_filter, d_label, codes))
+            else:
+                senses.extend(
+                    self._spec(primary, d_filter, d_label, codes)
+                    for d_filter, d_label in per_line.items()
+                )
+        return senses
 
     def _codes_from_candidates(self):
         """One entry per physical candidate code — the structural sense split for an
