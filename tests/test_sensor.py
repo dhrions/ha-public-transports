@@ -6,7 +6,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from siri_lite.models import MonitoredCall, RateLimitInfo
 
 from custom_components.public_transports.const import DOMAIN
-from custom_components.public_transports.sensor import PublicTransportsQuotaSensor, PublicTransportsSensor
+from custom_components.public_transports.sensor import (
+    PublicTransportsCallsTodaySensor,
+    PublicTransportsQuotaSensor,
+    PublicTransportsSensor,
+)
 
 ENTRY_DATA = {
     "city": "Strasbourg",
@@ -110,6 +114,12 @@ def _quota_sensor(hass, coordinators, key=QUOTA_KEY, transit_company="IDF Mobili
     return PublicTransportsQuotaSensor(hass, key, transit_company)
 
 
+def _calls_today_sensor(hass, coordinators, key=QUOTA_KEY, transit_company="IDF Mobilités / RATP"):
+    """Build a calls-today sensor whose live registry read sees `coordinators`."""
+    hass.data.setdefault(DOMAIN, {}).setdefault("_quota_coordinators", {})[key] = coordinators
+    return PublicTransportsCallsTodaySensor(hass, key, transit_company)
+
+
 async def test_quota_sensor_unavailable_without_any_rate_limit(hass):
     """CTS doesn't expose rate-limit headers — the sensor must not fake a zero quota."""
     sensor = _quota_sensor(hass, [_fake_coordinator(rate_limit=None, call_count_today=3)])
@@ -131,13 +141,24 @@ async def test_quota_sensor_native_value_is_most_conservative_remaining_day(hass
     assert sensor.extra_state_attributes["limit_day"] == 1000000
 
 
-async def test_quota_sensor_own_calls_today_sums_across_coordinators(hass):
-    sensor = _quota_sensor(hass, [
+async def test_calls_today_sensor_sums_across_coordinators(hass):
+    """own_calls_today is now a dedicated entity (not a quota-sensor attribute) so HA keeps
+    a real history for it — cf. PublicTransportsCallsTodaySensor docstring."""
+    sensor = _calls_today_sensor(hass, [
         _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=100), call_count_today=4),
         _fake_coordinator(rate_limit=RateLimitInfo(remaining_day=100), call_count_today=6),
     ])
 
-    assert sensor.extra_state_attributes["own_calls_today"] == 10
+    assert sensor.native_value == 10
+
+
+async def test_calls_today_sensor_available_without_rate_limit(hass):
+    """Unlike the quota sensor, this counter is purely local — it must stay available even
+    when the provider exposes no rate-limit headers (ex. CTS)."""
+    sensor = _calls_today_sensor(hass, [_fake_coordinator(rate_limit=None, call_count_today=3)])
+
+    assert sensor.available is True
+    assert sensor.native_value == 3
 
 
 async def test_quota_sensor_reflects_coordinators_added_by_a_sibling_entry_later(hass):

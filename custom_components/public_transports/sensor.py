@@ -46,6 +46,7 @@ async def async_setup_entry(
     keys_with_entity = hass.data[DOMAIN].setdefault("_quota_keys_with_entity", set())
     if coordinators and key not in keys_with_entity:
         entities.append(PublicTransportsQuotaSensor(hass, key, entry.data["transit_company"]))
+        entities.append(PublicTransportsCallsTodaySensor(hass, key, entry.data["transit_company"]))
         keys_with_entity.add(key)
         hass.data[DOMAIN].setdefault("_quota_owner_entry", {})[key] = entry.entry_id
 
@@ -178,12 +179,9 @@ class PublicTransportsQuotaSensor(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Only meaningful once the provider has reported a quota at least once.
-
-        The own-calls counter (own_calls_today) stays available even without provider
-        headers (ex. CTS), but it's not useful shown alone — hide the sensor entirely
-        rather than show an empty gauge.
-        """
+        """Only meaningful once the provider has reported a quota at least once — hide the
+        sensor entirely rather than show an empty gauge. PublicTransportsCallsTodaySensor,
+        which only depends on the local counter, is available independently of this."""
         return bool(self._rate_limits)
 
     @property
@@ -197,7 +195,14 @@ class PublicTransportsQuotaSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Full quota picture: provider-reported limits plus this integration's own share."""
+        """Full quota picture: provider-reported limits.
+
+        La consommation propre à cette intégration (own_calls_today) est désormais un
+        capteur à part entière (PublicTransportsCallsTodaySensor) plutôt qu'un attribut
+        ici : HA ne conserve pas d'historique par attribut, et l'exposer aux deux endroits
+        entretenait la confusion (cliquer sur l'attribut rouvrait le graphique de CE
+        capteur, pas un historique des appels).
+        """
         limits = self._rate_limits
         limit_day = next((rl.limit_day for rl in limits if rl.limit_day is not None), None)
         remaining_second = next(
@@ -208,7 +213,46 @@ class PublicTransportsQuotaSensor(SensorEntity):
             "limit_day": limit_day,
             "remaining_second": remaining_second,
             "limit_second": limit_second,
-            # Consommation de CETTE intégration seule — le quota ci-dessus est partagé
-            # par tout ce qui utilise le même token (autres apps, siri-lite CLI...).
-            "own_calls_today": sum(c.call_count_today for c in self._coordinators),
         }
+
+
+class PublicTransportsCallsTodaySensor(SensorEntity):
+    """Number of API calls made today by this integration, for one (company, endpoint) key.
+
+    Shares the same coordinator registry as PublicTransportsQuotaSensor (cf. its docstring)
+    but is a separate entity — not an attribute of the quota sensor — specifically so HA
+    keeps a real state history for it (attributes have none) and a dashboard can plot a
+    genuinely rising curve rather than reading the quota sensor's falling one in reverse.
+    """
+
+    _attr_icon = "mdi:counter"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # TOTAL_INCREASING : compteur qui grimpe pendant la journée puis retombe à 0 au
+    # changement de jour (cf. PublicTransportsDataUpdateCoordinator.call_count_today) — HA
+    # traite nativement cette rechute comme un nouveau cycle plutôt que comme une anomalie.
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "requêtes"
+
+    def __init__(self, hass: HomeAssistant, key: str, transit_company: str) -> None:
+        """Initialize the calls-today sensor for one (company, endpoint) key."""
+        self._hass = hass
+        self._key = key
+        self._attr_unique_id = f"calls_today_{key}"
+        self._attr_name = f"{transit_company} - appels effectués aujourd'hui"
+
+    @property
+    def _coordinators(self) -> list[PublicTransportsDataUpdateCoordinator]:
+        """Every coordinator currently sharing this quota key, across all entries."""
+        return self._hass.data[DOMAIN].get("_quota_coordinators", {}).get(self._key, [])
+
+    @property
+    def available(self) -> bool:
+        """Available as soon as a coordinator exists — no dependency on provider headers
+        (unlike PublicTransportsQuotaSensor), since this counter is purely local."""
+        return bool(self._coordinators)
+
+    @property
+    def native_value(self):
+        """Total calls made today by this integration, across every coordinator sharing
+        this key."""
+        return sum(c.call_count_today for c in self._coordinators)
