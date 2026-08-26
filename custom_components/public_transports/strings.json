@@ -96,7 +96,9 @@
     },
     "error": {
       "quota_exceeded": "Cette fréquence impliquerait environ {estimate} requêtes/jour{limit_text} — au-delà du quota connu. Choisissez un intervalle plus long ou ajoutez un créneau de silence.",
-      "quiet_hours_incomplete": "Renseignez à la fois le début et la fin du créneau de silence, ou laissez les deux vides."
+      "quiet_hours_incomplete": "Renseignez à la fois le début et la fin du créneau de silence, ou laissez les deux vides.",
+      "invalid_scan_interval": "La fréquence de rafraîchissement doit être un nombre entier de secondes.",
+      "scan_interval_out_of_range": "La fréquence de rafraîchissement doit être comprise entre {min_scan_interval} et {max_scan_interval} secondes."
     }
   }
 }

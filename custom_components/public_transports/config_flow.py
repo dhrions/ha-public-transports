@@ -1,22 +1,26 @@
+import logging
+
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
-    SelectOptionDict,
     TimeSelector,
 )
-import aiohttp
-import logging
+
 from .const import (
-    DOMAIN,
     CITIES_DATA,
-    TRANSIT_COMPANIES,
-    IDFM_ZONES_API_URL,
+    DOMAIN,
     IDFM_LINES_API_URL,
+    IDFM_ZONES_API_URL,
+    MAX_SCAN_INTERVAL_SECONDS,
+    MIN_SCAN_INTERVAL_SECONDS,
     SCAN_INTERVAL_OPTIONS,
+    TRANSIT_COMPANIES,
 )
 from .coordinator import (
     build_siri_client,
@@ -818,6 +822,10 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         return {
             "estimate": self._format_count(estimate),
             "limit_text": limit_text,
+            # Repris par l'erreur scan_interval_out_of_range, jamais affichés hors erreur —
+            # inoffensifs à calculer systématiquement (pas de coût, pas d'appel réseau).
+            "min_scan_interval": str(MIN_SCAN_INTERVAL_SECONDS),
+            "max_scan_interval": str(MAX_SCAN_INTERVAL_SECONDS),
         }, estimate, limit_day
 
     async def async_step_init(self, user_input=None):
@@ -867,23 +875,39 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         cur_quiet_start, cur_quiet_end = entry_quiet_hours(self.config_entry)
 
         if user_input is not None:
-            scan_interval = int(user_input.get("scan_interval", cur_scan_interval))
+            raw_scan_interval = user_input.get("scan_interval", cur_scan_interval)
+            try:
+                scan_interval = int(raw_scan_interval)
+            except (TypeError, ValueError):
+                scan_interval = None
+
             quiet_start = (user_input.get("quiet_hours_start") or "").strip() or None
             quiet_end = (user_input.get("quiet_hours_end") or "").strip() or None
             errors = {}
-            if bool(quiet_start) != bool(quiet_end):
+            if scan_interval is None:
+                errors["base"] = "invalid_scan_interval"
+            elif not (MIN_SCAN_INTERVAL_SECONDS <= scan_interval <= MAX_SCAN_INTERVAL_SECONDS):
+                errors["base"] = "scan_interval_out_of_range"
+            elif bool(quiet_start) != bool(quiet_end):
                 errors["base"] = "quiet_hours_incomplete"
 
+            # scan_interval est requis par _estimate_placeholders même quand la saisie est
+            # invalide (pour réafficher un formulaire cohérent) — la valeur précédente sert
+            # de repli, l'erreur ci-dessus empêche déjà la sauvegarde.
             placeholders, estimate, limit_day = self._estimate_placeholders(
-                scan_interval, quiet_start, quiet_end
+                scan_interval if scan_interval is not None else cur_scan_interval,
+                quiet_start, quiet_end
             )
             if not errors and limit_day is not None and estimate > limit_day:
                 errors["base"] = "quota_exceeded"
 
             if errors:
+                # raw_scan_interval (pas scan_interval, potentiellement None si le parsing
+                # a échoué) : l'utilisateur doit revoir exactement ce qu'il a tapé pour le
+                # corriger, pas un champ retombé sur l'ancienne valeur ou sur "None".
                 schema = self._build_schema(
                     line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
-                    scan_interval_options, scan_interval, quiet_start or "", quiet_end or "",
+                    scan_interval_options, raw_scan_interval, quiet_start or "", quiet_end or "",
                 )
                 return self.async_show_form(
                     step_id="init", data_schema=schema, errors=errors, description_placeholders=placeholders
@@ -955,7 +979,9 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         # exige value=str) ; un champ non touché par l'utilisateur renvoie ce default tel
         # quel à la soumission — un int ici ferait échouer la validation avec "expected
         # str", peu importe si les créneaux horaires sont eux corrects.
-        schema[vol.Required("scan_interval", default=str(cur_scan_interval))] = dropdown(scan_interval_options)
+        schema[vol.Required("scan_interval", default=str(cur_scan_interval))] = dropdown(
+            scan_interval_options, custom_value=True
+        )
         # Pas de default="" : TimeSelector rejette la chaîne vide à la validation (les
         # deux champs doivent rester réellement absents tant qu'aucun créneau n'est
         # configuré, pas "vides").

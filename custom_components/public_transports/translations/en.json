@@ -96,7 +96,9 @@
     },
     "error": {
       "quota_exceeded": "This frequency would mean about {estimate} requests/day{limit_text} — above the known quota. Pick a longer interval or add quiet hours.",
-      "quiet_hours_incomplete": "Set both the start and end of the quiet-hours window, or leave both empty."
+      "quiet_hours_incomplete": "Set both the start and end of the quiet-hours window, or leave both empty.",
+      "invalid_scan_interval": "The refresh frequency must be a whole number of seconds.",
+      "scan_interval_out_of_range": "The refresh frequency must be between {min_scan_interval} and {max_scan_interval} seconds."
     }
   }
 }

@@ -84,10 +84,12 @@ tous les passages sont pris en compte. Le terminus précis de chaque rame reste 
 
 Par défaut, le capteur est rafraîchi **toutes les 60 secondes**, avec un **créneau de
 silence de 23:00 à 07:00** (heure locale de Home Assistant) : pendant ce créneau aucun
-appel n'est émis et la dernière valeur connue est conservée. Fréquence (de 1 s à 10 min)
-et créneau de silence sont modifiables : *Paramètres → Appareils et services → Public
-Transports →* menu ⋮ de l'entrée *→ Options*. Le formulaire affiche l'estimation du volume
-quotidien pour le réglage choisi et **refuse un réglage qui dépasserait le quota** effectif
+appel n'est émis et la dernière valeur connue est conservée. Fréquence (de 1 s à 10 min,
+valeur libre — le sélecteur propose des présets usuels mais accepte n'importe quel entier
+de secondes dans cette plage) et créneau de silence sont modifiables : *Paramètres →
+Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*. Le formulaire
+affiche l'estimation du volume quotidien pour le réglage choisi et **refuse un réglage qui
+dépasserait le quota** effectif
 du jeton.
 
 ⚠️ **Le quota d'API est compté par token, pas par intégration** : un même token peut

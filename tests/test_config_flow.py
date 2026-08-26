@@ -480,6 +480,68 @@ async def test_options_flow_accepts_projection_within_known_quota(hass):
     assert result["data"]["scan_interval"] == 60
 
 
+async def test_options_flow_accepts_custom_scan_interval_outside_preset_list(hass):
+    """scan_interval est un combobox (custom_value=True) : une valeur absente de
+    SCAN_INTERVAL_OPTIONS (ex. 45s) doit être acceptée, pas seulement les présets."""
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], RateLimitInfo(limit_day=1000000)),
+    ):
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "45"})
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["scan_interval"] == 45
+
+
+async def test_options_flow_rejects_non_numeric_scan_interval(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "abc"})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "invalid_scan_interval"
+
+
+async def test_options_flow_rejects_scan_interval_below_minimum(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "0"})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "scan_interval_out_of_range"
+
+
+async def test_options_flow_rejects_scan_interval_above_maximum(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "99999"})
+
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "scan_interval_out_of_range"
+
+
 async def test_options_flow_saves_without_quota_check_when_unknown(hass):
     """CTS doesn't expose rate-limit headers — no limit_day means no comparison possible."""
     entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
