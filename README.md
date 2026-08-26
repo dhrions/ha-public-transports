@@ -111,12 +111,20 @@ CTS à ce jour. Pour sonder en continu, mettre le même début et la même fin d
 `00:00`/`00:00`).
 
 Un **capteur « quota API »** dédié (catégorie diagnostic) expose, quand le producteur le
-fournit dans ses en-têtes (cas de PRIM ; absent sur CTS), le quota quotidien restant et,
-en attribut `own_calls_today`, la part consommée par cette intégration seule. Le quota est
-plafonné par le producteur **par transporteur et par endpoint** (confirmé sur PRIM), pas
-par entrée : plusieurs arrêts PRIM configurés avec le même jeton partagent donc **un seul**
-capteur (`IDF Mobilités / RATP - quota API`) plutôt que d'afficher chacun sa propre lecture
-du même compteur.
+fournit dans ses en-têtes (cas de PRIM ; absent sur CTS), le quota quotidien restant. Le
+quota est plafonné par le producteur **par transporteur et par endpoint** (confirmé sur
+PRIM), pas par entrée : plusieurs arrêts PRIM configurés avec le même jeton partagent donc
+**un seul** capteur (`IDF Mobilités / RATP - quota API`) plutôt que d'afficher chacun sa
+propre lecture du même compteur.
+
+La part consommée par cette intégration seule (tous arrêts confondus, pour ce transporteur)
+est exposée par un **second capteur dédié**, `<transporteur> - appels effectués
+aujourd'hui` — plutôt qu'en attribut du premier : un attribut n'a pas d'historique HA
+propre, ce qui empêchait tout graphique de la consommation dans le temps. Ce capteur ne
+dépend pas des en-têtes du producteur (disponible même sur CTS) et repart de zéro à chaque
+changement de jour **ou à chaque redémarrage de Home Assistant** — le compteur n'est pas
+persisté, un redémarrage en cours de journée sous-estime donc le total réel pour le reste
+de la journée.
 
 ## 📦 Dépendances
 
