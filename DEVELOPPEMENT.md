@@ -39,13 +39,25 @@ des releases taguées), pas de synchro fichier directe. Séquence fiable :
    `release_summary` de l'entité `update.*` passe à `<ha-alert
    alert-type='error'>Restart of Home Assistant required</ha-alert>`.
 5. **Redémarrer Core pour de vrai.** Un redémarrage déclenché via l'API REST (service
-   `homeassistant.restart`) peut répondre vite/sans erreur sans avoir réellement cyclé
-   le process Python — piège rencontré : le nouveau code sur disque n'était pas repris
-   en mémoire malgré un appel API « réussi » (capteurs déjà en place restés visibles,
-   mais aucune nouvelle entité issue du nouveau code n'apparaissait). Le redémarrage
-   fiable a été `ha core restart` tapé par l'utilisateur en **session SSH interactive**
-   sur l'hôte (CLI Supervisor) — cohérent avec la restriction SSH documentée plus bas
-   pour hardy-hop (Claude Code n'a de toute façon aucun accès SSH à vivid-yam).
+   `homeassistant.restart`) **ou via l'UI** (*Paramètres → Système → Redémarrer*) peut
+   répondre vite/sans erreur sans avoir réellement cyclé le process Python — piège
+   rencontré à plusieurs reprises (2026-08-22, puis à nouveau 2026-09-01 via l'UI cette
+   fois) : le nouveau code sur disque n'était pas repris en mémoire malgré un appel
+   « réussi » (capteurs déjà en place restés visibles, mais toujours avec l'ancienne
+   logique). Le redémarrage fiable reste `ha core restart` tapé par l'utilisateur en
+   **session SSH interactive** sur l'hôte (CLI Supervisor) — cohérent avec la
+   restriction SSH documentée plus bas pour hardy-hop (Claude Code n'a de toute façon
+   aucun accès SSH à vivid-yam) — mais un redémarrage via l'UI a fini par fonctionner le
+   2026-09-01 : pas de garantie absolue dans un sens ou l'autre, **toujours vérifier
+   après coup** plutôt que de faire confiance à la méthode utilisée.
+   - **Vérification fiable qu'un redémarrage a vraiment rechargé le code** (au-delà de
+     `installed_version`, qui ne reflète que l'état HACS sur disque, pas le process en
+     mémoire) : appeler un endpoint qui n'existe que si le nouveau code tourne
+     réellement. Si le déploiement ajoute/modifie `diagnostics.py`, `GET
+     /api/diagnostics/config_entry/{entry_id}` (trouver l'`entry_id` via
+     `/api/config/config_entries/entry`, cf. ci-dessous) répond `200` seulement si ce
+     module est chargé — un `404` prouve sans ambiguïté que l'ancien process tourne
+     encore.
 
 ### Diagnostiquer à distance sans accès SSH/filesystem
 
@@ -64,8 +76,37 @@ des releases taguées), pas de synchro fichier directe. Séquence fiable :
   qu'elle existe, cf. incident ci-dessous).
 - `/api/config/config_entries/entry` (non documenté officiellement dans la doc REST
   HA, mais fonctionnel sur cette instance) liste les entrées avec `entry_id`/`domain`/
-  `state`, utile pour retrouver l'`entry_id` de HACS ou d'une entrée `public_transports`
+  `state`/`reason` (ce dernier très utile : une entrée en échec de setup y affiche le
+  message d'erreur, ex. `Error communicating with API: 401 Client Error: Unauthorized
+  ...`), utile pour retrouver l'`entry_id` de HACS ou d'une entrée `public_transports`
   sans passer par l'UI.
+- `GET /api/diagnostics/config_entry/{entry_id}` renvoie le même export que
+  *Télécharger les diagnostics* dans l'UI — depuis l'ajout de `diagnostics.py` (v0.7.3),
+  c'est le **seul** canal qui expose `entry.data` **et** `entry.options` (caviardés,
+  `api_token` retiré) à distance, sans SSH ni accès `.storage`. Utile aussi comme
+  vérification de rechargement de code, cf. point 5 ci-dessus.
+  - **Piège découvert le 2026-09-01 en s'en servant pour diagnostiquer un pôle
+    multimodal dont les capteurs affichaient tous la même ligne** :
+    `entry_sense_specs()` calcule `{**entry.data, **entry.options}["senses"]` — si les
+    deux contiennent une clé `senses`, **`entry.options` écrase silencieusement
+    `entry.data`**. Un bug de l'écran d'options (corrigé au commit `0efa215`, v0.7.2)
+    avait réécrit `entry.options.senses` en écrasant le `line_filter` propre de chaque
+    capteur d'un pôle vers une seule ligne, alors que `entry.data.senses` (jamais
+    modifié depuis la création) restait intact. Résultat : regarder uniquement
+    `entry.data` dans un diagnostic fait conclure à tort que le storage est sain — il
+    faut **toujours comparer `data` ET `options`** quand `entry_sense_specs()` ou tout
+    autre code fusionnant les deux est en cause. Un simple redéploiement du correctif +
+    redémarrage ne répare pas une entrée déjà corrompue de cette façon (les `options`
+    corrompues restent sur disque) : il faut **supprimer et recréer l'entrée** (une
+    entrée neuve n'a pas d'`options`, donc retombe sur `entry.data.senses`, sain par
+    construction).
+  - Piège annexe rencontré pendant cette recréation : le formulaire de config_flow
+    demande le token **API PRIM** (`apiKey` UUID du compte
+    prim.iledefrance-mobilites.fr), pas le jeton longue durée Home Assistant utilisé
+    partout ailleurs dans ce carnet — les deux se ressemblent assez pour être confondus.
+    Se tromper ne bloque pas la saisie (pas d'erreur de validation) mais fait échouer
+    l'entrée en `setup_retry` avec `401 Unauthorized` côté API PRIM, visible dans le
+    `reason` de `/api/config/config_entries/entry` (cf. point précédent).
 - Piège de reproduction locale : les tests unitaires qui appellent une méthode de flow
   HA **directement** (ex. `flow.async_step_init()` sur une instance construite à la
   main) contournent le vrai `FlowManager`
