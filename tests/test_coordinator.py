@@ -23,6 +23,7 @@ from custom_components.public_transports.const import (
 from custom_components.public_transports.coordinator import (
     PublicTransportsDataUpdateCoordinator,
     build_siri_client,
+    call_is_upcoming,
     call_matches,
     entry_quiet_hours,
     entry_scan_interval,
@@ -154,6 +155,27 @@ def test_call_matches_rejects_wrong_direction():
 def test_call_matches_accepts_matching_line_and_direction():
     call = MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller")
     assert call_matches(call, line_filter="13", direction_filter="Aller") is True
+
+
+def test_call_is_upcoming_rejects_departed_passage():
+    """A passage whose arrival is in the past is already departed — must be dropped, not
+    shown as "0 min" (the pre-quiet-hours cache re-served all night, cf. incident nocturne)."""
+    now = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+    call = MonitoredCall(expected_arrival_time="2026-09-01T22:50:00+00:00")
+    assert call_is_upcoming(call, now=now) is False
+
+
+def test_call_is_upcoming_accepts_future_passage():
+    now = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+    call = MonitoredCall(expected_arrival_time="2026-09-02T03:05:00+00:00")
+    assert call_is_upcoming(call, now=now) is True
+
+
+def test_call_is_upcoming_keeps_call_with_unparseable_arrival():
+    """An absent/unparseable arrival time is kept rather than silently dropped on a
+    producer quirk."""
+    assert call_is_upcoming(MonitoredCall(expected_arrival_time=None)) is True
+    assert call_is_upcoming(MonitoredCall(expected_arrival_time="not-a-date")) is True
 
 
 def test_entry_scan_interval_falls_back_to_default_when_unset():

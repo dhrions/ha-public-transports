@@ -79,6 +79,35 @@ async def test_sensor_state_none_when_no_next_call(hass):
     assert state.state == "unknown"
 
 
+async def test_sensor_state_unknown_when_all_passages_departed(hass):
+    """Cas nocturne : en heures creuses le coordinator re-sert le cache d'avant la coupure ;
+    une fois tous ses passages dans le passé, le capteur doit repasser à unknown, pas rester
+    figé à « 0 min » (siri-lite plafonne le temps restant négatif à 0)."""
+    calls = [
+        MonitoredCall(
+            stop_point_name="Homme de Fer",
+            expected_arrival_time="2000-01-01T00:05:00+00:00",
+            line_ref="A",
+            published_line_name="Ligne A",
+            destination_name="Illkirch",
+        ),
+    ]
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        return_value=calls,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.homme_de_fer_prochain_passage")
+    assert state is not None
+    assert state.state == "unknown"
+
+
 def test_build_name_includes_line_and_direction_when_filtered():
     """A filtered sense spec must surface its line/direction in the sensor name."""
     entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)

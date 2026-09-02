@@ -15,6 +15,7 @@ from siri_lite.models import MonitoredCall
 from .const import DOMAIN
 from .coordinator import (
     PublicTransportsDataUpdateCoordinator,
+    call_is_upcoming,
     call_matches,
     entry_sense_specs,
     quota_key,
@@ -96,11 +97,19 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def _calls(self) -> list[MonitoredCall]:
-        """This sensor's slice of the shared raw feed (filtered by its own spec)."""
+        """This sensor's slice of the shared raw feed (filtered by its own spec).
+
+        Also drops passages already departed (call_is_upcoming): the coordinator re-serves
+        the pre-quiet-hours cache untouched all night, so without this every line would
+        show a stale "0 min" hours after the last real service. Once every passage is in
+        the past, this yields an empty list and the sensor reads None ("no upcoming
+        passage") rather than 0.
+        """
         raw = self.coordinator.data or []
         return [
             call for call in raw
             if call_matches(call, self._spec.get("line_filter"), self._spec.get("direction_filter"))
+            and call_is_upcoming(call)
         ]
 
     @property

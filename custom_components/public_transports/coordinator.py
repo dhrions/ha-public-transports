@@ -160,6 +160,27 @@ def entry_sense_specs(entry: ConfigEntry) -> list[dict]:
     }]
 
 
+def call_is_upcoming(call: MonitoredCall, now=None) -> bool:
+    """Whether a passage's expected arrival is still in the future (not already departed).
+
+    siri-lite's extract_remaining_time_before_arrival clamps negatives to 0, so by the
+    minutes value alone a stale passage whose arrival is in the past is indistinguishable
+    from one arriving "now". This recomputes the raw sign from expected_arrival_time to
+    drop already-departed passages — notably the pre-quiet-hours cache re-served untouched
+    all night (cf. _async_update_data), which would otherwise show every line stuck at
+    "0 min" hours after the last real service.
+
+    An absent or unparseable arrival time is kept (returns True) rather than silently
+    dropped: better a possibly-stale passage than hiding one on a producer quirk.
+    """
+    arrival = dt_util.parse_datetime(call.expected_arrival_time or "")
+    if arrival is None:
+        return True
+    if now is None:
+        now = dt_util.utcnow()
+    return arrival >= now
+
+
 def call_matches(call: MonitoredCall, line_filter, direction_filter) -> bool:
     """Whether a passage passes a spec's line/direction filter.
 
