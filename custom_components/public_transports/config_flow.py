@@ -368,8 +368,8 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.error(f"Unknown auth_type: {auth_type}")
 
             _LOGGER.debug(f"Making API request to: {url}")
-            _LOGGER.debug(f"Headers: {headers}")
-            _LOGGER.debug(f"Auth: {auth}")
+            _LOGGER.debug(f"Headers keys: {list(headers.keys())}")
+            _LOGGER.debug(f"Auth configured: {auth is not None}")
 
             try:
                 async with aiohttp.ClientSession() as session:
