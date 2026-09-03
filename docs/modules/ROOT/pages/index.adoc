@@ -1,0 +1,45 @@
+= Public Transports for Home Assistant
+:description: Intégration custom Home Assistant affichant les prochains passages de transport en commun à un arrêt configuré (CTS, IDF Mobilités / RATP)
+:keywords: Home Assistant, HACS, transport en commun, SIRI-lite, CTS, PRIM, IDF Mobilités
+
+image::ha-public-transports.png[Public Transports for Home Assistant,width=300,align=center]
+
+== ⚡ TL;DR
+
+* 🚌 Configure un arrêt (ville, compagnie, arrêt) via l'UI Home Assistant et expose un
+  capteur : temps restant avant le prochain passage, ligne, destination.
+* 🎯 Réseaux supportés aujourd'hui : **CTS (Strasbourg/Schiltigheim)** et **IDF Mobilités /
+  RATP (Paris, via PRIM)**. D'autres compagnies SIRI-lite peuvent être ajoutées dans
+  `const.py`.
+* 🚀 Installation : copier `custom_components/public_transports/` dans le dossier
+  `custom_components` de Home Assistant (ou via HACS), redémarrer, puis ajouter
+  l'intégration **Public Transports** depuis les paramètres.
+
+[source,bash]
+----
+cp -r custom_components/public_transports/ <config>/custom_components/
+----
+
+Intégration custom Home Assistant (HACS) affichant les prochains passages de transport en
+commun à un arrêt configuré, via https://pypi.org/project/siri-lite/[siri-lite].
+
+== ✨ Fonctionnalités
+
+* 🔎 Découverte automatique des arrêts (SIRI-lite native pour CTS, référentiel public IDFM
+  pour PRIM faute de `stoppoints-discovery` exposée)
+* 🧭 Filtrage par sens réel de circulation (`DirectionRef` SIRI), y compris sur une ligne
+  fourchue à plusieurs terminus par sens
+* 🚏 Regroupement d'un pôle multimodal (bus + métro d'une même place) en un seul capteur,
+  opt-in, via la zone de correspondance IDFM (`zdcid`)
+* 🚶 Offset de temps de marche : l'état du capteur peut refléter « dans combien de temps
+  partir » plutôt que l'heure d'arrivée brute, avec un réglage par entrée surchargeable
+  par ligne/sens
+* 📊 Capteurs dédiés de quota API et de consommation propre à l'intégration, pour
+  surveiller l'usage du token sans dépasser le quota du producteur
+
+== 📖 Pour en savoir plus
+
+* xref:installation.adoc[🚀 Installation]
+* xref:usage.adoc[💻 Utilisation]
+* xref:configuration.adoc[⚙️ Configuration]
+* xref:workflows.adoc[🔄 Workflows CI/CD]

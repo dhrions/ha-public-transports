@@ -1,0 +1,5 @@
+* xref:ROOT:index.adoc[🏠 Accueil]
+* xref:ROOT:installation.adoc[🚀 Installation]
+* xref:ROOT:usage.adoc[💻 Utilisation]
+* xref:ROOT:configuration.adoc[⚙️ Configuration]
+* xref:ROOT:workflows.adoc[🔄 Workflows CI/CD]

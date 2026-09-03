@@ -1,0 +1,14 @@
+site:
+  title: Public Transports for Home Assistant
+content:
+  branches: HEAD
+  sources:
+  - url: ..
+    start_path: docs
+    worktrees: true
+ui:
+  bundle:
+    url: https://gitlab.com/antora/antora-ui-default/-/jobs/artifacts/HEAD/raw/build/ui-bundle.zip?job=bundle-stable
+    snapshot: true
+output:
+  dir: ./build

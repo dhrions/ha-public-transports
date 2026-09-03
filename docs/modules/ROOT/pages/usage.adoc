@@ -1,0 +1,64 @@
+= 💻 Utilisation
+
+== 📡 Le capteur
+
+Chaque arrêt configuré crée un capteur `sensor.<nom_arrêt>_prochain_passage` :
+
+[cols="1,3"]
+|===
+| Champ | Contenu
+
+| État | Temps restant avant le prochain passage, en minutes
+| `stop_code` | Code d'arrêt physique effectivement interrogé (ex. quai précis d'un arrêt CTS à plusieurs codes) — pour un pôle regroupé, le code primaire (premier arrêt choisi)
+| `stop_codes` | Liste de tous les codes d'arrêt physiques interrogés par ce capteur — un seul élément hors regroupement de pôle, plusieurs pour un pôle multimodal
+| `line` | Référence de la ligne
+| `published_line_name` | Nom publié de la ligne
+| `destination` | Terminus du véhicule (prochain passage)
+| `next_times` | Liste plate des minutes des prochains passages (ex. `next_times[1]` = passage suivant), pratique sur un dashboard/en template sans fouiller `next_passages`
+| `next_passages` | Liste de tous les passages retournés : `{time, line, destination}` chacun — le terminus par passage y reste visible même quand le capteur est filtré sur un sens
+|===
+
+Quand un filtre ligne et/ou sens est appliqué, le **nom du capteur** le reflète (ex.
+`Gaîté 13 → Châtillon Montrouge - prochain passage`), et l'état/la liste ne comptent que
+les passages du sens choisi. Sans filtre, le nom reste `<nom_arrêt> - prochain passage` et
+tous les passages sont pris en compte. Le terminus précis de chaque rame reste dans
+`next_passages`.
+
+Si un xref:configuration.adoc[temps de marche] est réglé, l'état représente « dans
+combien de temps partir » plutôt que l'heure d'arrivée brute —
+les scalaires de tête (`line`/`destination`) décrivent alors le passage encore rattrapable,
+pas nécessairement l'imminent.
+
+== Utilisation dans un dashboard
+
+Le capteur s'utilise comme n'importe quel capteur numérique Home Assistant — carte
+Lovelace, automation, template. Exemple de carte affichant l'état (temps restant, en
+minutes) et la ligne/destination du prochain passage rattrapable :
+
+[source,yaml]
+----
+type: entities
+entities:
+  - entity: sensor.gaite_prochain_passage
+    name: Prochain métro
+    secondary_info: last-changed
+----
+
+Exemple de template exploitant `next_times` pour afficher les 3 prochains passages sans
+filtrer sur le sens :
+
+[source,yaml]
+----
+{{ state_attr('sensor.gaite_prochain_passage', 'next_times')[:3] | join(', ') }} min
+----
+
+Une automation peut se déclencher sur l'état numérique, par exemple pour notifier quand il
+reste moins de 5 minutes pour partir :
+
+[source,yaml]
+----
+trigger:
+  - platform: numeric_state
+    entity_id: sensor.gaite_prochain_passage
+    below: 5
+----

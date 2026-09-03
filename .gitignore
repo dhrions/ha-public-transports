@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv-test/
 .coverage
+
+# Antora build output
+docs/build/

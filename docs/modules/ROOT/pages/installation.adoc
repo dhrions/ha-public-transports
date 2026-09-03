@@ -1,0 +1,27 @@
+= 🚀 Installation
+
+== Prérequis
+
+* Une instance Home Assistant récente, avec accès à `custom_components/`
+* Un token API pour la compagnie de transport visée (CTS ou PRIM) — voir
+  xref:configuration.adoc[⚙️ Configuration] pour où l'obtenir
+
+== Installation
+
+Deux façons équivalentes d'installer les fichiers :
+
+[source,bash]
+----
+cp -r custom_components/public_transports/ <config>/custom_components/
+----
+
+Ou via HACS, en ajoutant ce dépôt comme dépôt personnalisé (catégorie *Integration*).
+
+Puis :
+
+. Redémarrer Home Assistant.
+. Ajouter l'intégration **Public Transports** depuis *Paramètres → Appareils et
+  services → Ajouter une intégration*.
+
+L'assistant de configuration guide ensuite en plusieurs étapes (ville, compagnie, token,
+arrêt, ligne, sens) — voir xref:configuration.adoc[⚙️ Configuration].

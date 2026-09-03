@@ -1,0 +1,6 @@
+name: ha-public-transports
+title: Public Transports for Home Assistant
+version: true
+start_page: ROOT:index.adoc
+nav:
+- modules/nav.adoc

@@ -1,0 +1,53 @@
+= 🔄 Workflows CI/CD
+
+Le dépôt s'appuie sur quatre workflows Gitea Actions (`.gitea/workflows/`).
+
+[cols="1,3"]
+|===
+| Workflow | Rôle
+
+| `tests.yml`
+| Suite de tests avec couverture (`pytest --cov`).
+
+| `secrets-scan.yml`
+| Scan de l'historique complet avec `gitleaks` à chaque push. Bloquant.
+
+| `audit.yml`
+| Veille hebdomadaire des dépendances (`pip-audit`), non bloquante. Variante du template
+  standard du parc : ce dépôt n'a pas de `pyproject.toml`/`[build-system]` (intégration
+  Home Assistant, dépendances déclarées via `manifest.json` et `requirements.test.txt`),
+  donc `pip-audit .` échouerait à la résolution — le scan porte sur un fichier
+  `requirements` assemblé à la volée (`jq` sur `manifest.json` + `requirements.test.txt`).
+
+| `docs.yml`
+| Build Antora et déploiement sur push `master` touchant `docs/**`, `.repo-meta.json` ou
+  l'illustration du dépôt.
+|===
+
+Pas de `release.yml` : ce dépôt n'utilise pas semantic-release, le versionnement du
+`manifest.json` (champ `version`) est manuel, par commit `🔖 chore: bump version`.
+
+== Tests (`tests.yml`)
+
+[source,bash]
+----
+pytest --cov=custom_components --cov-report=term
+----
+
+== Scan de secrets (`secrets-scan.yml`)
+
+À chaque push, sur l'historique complet du dépôt. Bloquant : un secret détecté fait
+échouer le job.
+
+== Audit des dépendances (`audit.yml`)
+
+Hebdomadaire (lundi 6h) et sur tout changement de `manifest.json` ou
+`requirements.test.txt`. Non bloquant (`continue-on-error`) : une CVE dans une dépendance
+transitive commune ne doit pas geler ce dépôt à elle seule.
+
+== Documentation (`docs.yml`)
+
+Construit la documentation Antora et la déploie sur le serveur de doc du parc, puis
+déclenche la régénération de l'index `repos-meta`. Se déclenche aussi sur un changement de
+`.repo-meta.json` ou de l'illustration du dépôt, pour que la copie déployée ne diverge pas
+de la source.

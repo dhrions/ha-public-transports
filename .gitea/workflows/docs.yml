@@ -1,0 +1,155 @@
+# 📚 Build and Deploy Antora Documentation (Gitea Actions)
+#
+# Workflow canonique du parc : identique dans tous les dépôts, à la seule
+# exception de la variable REPO ci-dessous. Norme et exemptions :
+# repos-meta, docs-repos/modules/ROOT/pages/archetype-workflow-docs.adoc
+#
+# Prérequis : le secret REPOS_META_DISPATCH_TOKEN doit exister sur le dépôt
+# (gitea-secret-set dhrions/<repo> REPOS_META_DISPATCH_TOKEN).
+
+name: Build and Deploy Antora Documentation
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/**'
+      - '.gitea/workflows/docs.yml'
+      # L'illustration du dépôt et ses métadonnées sont déployées par ce
+      # workflow : sans ces deux filtres, une régénération par imgforge ne
+      # déclencherait aucun run et la copie publiée resterait périmée.
+      - '.repo-meta.json'
+      - '*.png'
+  workflow_dispatch:
+
+env:
+  # Épinglée pour la reproductibilité — vérifier les releases avant de faire
+  # monter ce numéro : https://www.npmjs.com/package/@antora/cli
+  ANTORA_VERSION: "3.1.15"
+
+jobs:
+  build-and-deploy:
+    # Label du runner hébergeant le volume nginx. Surtout pas ubuntu-latest :
+    # sur un autre runner, Docker créerait /deploy vide et le déploiement
+    # réussirait en écrivant dans le vide.
+    runs-on: docs-deploy
+    env:
+      # Seule ligne à adapter par dépôt.
+      REPO: ha-public-transports
+    container:
+      volumes:
+        - /home/dockeradmin/docker/nginx-docs/html:/deploy
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Antora
+        run: npm install -g @antora/cli@${ANTORA_VERSION} @antora/site-generator@${ANTORA_VERSION}
+
+      - name: Build documentation
+        working-directory: docs
+        run: antora --fetch antora-playbook.yml
+
+      - name: Deploy documentation
+        run: |
+          echo "Deploying documentation..."
+
+          # Le dossier de build porte le nom du composant Antora, qui ne
+          # coïncide pas toujours avec celui du dépôt (ansible →
+          # ansible-documentation). On le lit plutôt que de le supposer.
+          COMPONENT=$(sed -n 's/^name:[[:space:]]*//p' docs/antora.yml | head -1)
+
+          # Vérifier AVANT de détruire : sans ce garde-fou, un build absent ou
+          # mal nommé vide la doc en ligne puis échoue (incident du 2026-07-29).
+          if [ -z "$COMPONENT" ] || [ ! -d "docs/build/$COMPONENT" ]; then
+            echo "::error::Composant Antora introuvable (COMPONENT='$COMPONENT'). Contenu de docs/build :"
+            ls -la docs/build
+            exit 1
+          fi
+          echo "Composant Antora : $COMPONENT → /deploy/dhrions/$REPO"
+
+          # Copy shared assets (CSS, JS, fonts) to root
+          cp -r docs/build/_/ /deploy/dhrions/_/
+          chmod -R 755 /deploy/dhrions/_/
+
+          # Deploy component docs
+          rm -rf /deploy/dhrions/$REPO
+          mkdir -p /deploy/dhrions/$REPO
+          cp -r docs/build/$COMPONENT/* /deploy/dhrions/$REPO/
+
+          # Antora range les pages sous un segment de version (main, master…)
+          # quand le composant en déclare un ; sinon elles atterrissent
+          # directement à la racine du composant, qui porte alors son propre
+          # index.html. On ne pose une redirection que dans le premier cas, et
+          # vers la version réellement produite : un « main/ » codé en dur
+          # donne une page d'accueil morte sur tout dépôt dont la branche
+          # n'est pas main (arx, siri-lite, la famille master…).
+          if [ -f "/deploy/dhrions/$REPO/index.html" ]; then
+            echo "Antora a produit un index.html à la racine — pas de redirection à poser."
+          else
+            VERSION=$(ls "docs/build/$COMPONENT" | grep -v '^_' | head -1)
+            if [ -n "$VERSION" ] && [ -f "docs/build/$COMPONENT/$VERSION/index.html" ]; then
+              echo "Redirection vers $VERSION/index.html"
+              cat > /deploy/dhrions/$REPO/index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta http-equiv="refresh" content="0; url=$VERSION/index.html">
+            <title>Redirecting...</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="$VERSION/index.html">documentation</a>...</p>
+          </body>
+          </html>
+          EOF
+            else
+              echo "::warning::Ni index.html à la racine ni version exploitable — la page d'accueil de /dhrions/$REPO servira un listing."
+            fi
+          fi
+          chmod -R 755 /deploy/dhrions/$REPO
+          echo "Deployment complete!"
+          ls -la /deploy/dhrions/$REPO/
+
+      - name: Deploy project metadata and icon
+        run: |
+          # Copy .repo-meta.json if it exists at the repo root
+          if [ -f ".repo-meta.json" ]; then
+            cp .repo-meta.json /deploy/dhrions/$REPO/.repo-meta.json
+            echo "Deployed .repo-meta.json"
+
+            # Extract image field and copy the icon if specified
+            ICON=$(node -e "try{const m=JSON.parse(require('fs').readFileSync('.repo-meta.json','utf8'));if(m.image)console.log(m.image)}catch(e){}")
+            if [ -n "$ICON" ] && [ -f "$ICON" ]; then
+              cp "$ICON" /deploy/dhrions/$REPO/"$ICON"
+              echo "Deployed icon: $ICON"
+            fi
+          fi
+
+      - name: Trigger repos-meta index regeneration
+        if: success()
+        env:
+          GITEA_TOKEN: ${{ secrets.REPOS_META_DISPATCH_TOKEN }}
+        run: |
+          # -K - lit l'en-tête Authorization depuis stdin plutôt que l'argv : un token
+          # passé en -H apparaîtrait en clair dans /proc/<pid>/cmdline le temps de l'appel.
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -K - \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"main"}' \
+            "https://gitea.dhrions.fr/api/v1/repos/dhrions/repos-meta/actions/workflows/docs.yml/dispatches" \
+            <<< "header = \"Authorization: token ${GITEA_TOKEN}\"")
+          if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+            echo "Successfully triggered repos-meta index regeneration"
+          else
+            echo "::warning::Failed to trigger repos-meta index regeneration (HTTP $HTTP_CODE). The project index may not be updated."
+          fi

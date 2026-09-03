@@ -1,0 +1,101 @@
+= ⚙️ Configuration
+
+L'assistant de configuration guide en plusieurs étapes :
+
+. **Ville** — champ de recherche avec liste déroulante, parmi les villes ayant au moins
+  une compagnie câblée (`Strasbourg`, `Schiltigheim`, `Paris`).
+. **Compagnie de transport** — CTS pour Strasbourg/Schiltigheim ; IDF Mobilités / RATP
+  pour Paris.
+. **Token API** — nécessaire dans tous les cas : un token CTS (Basic Auth) pour la CTS,
+  ou une clé API PRIM (header `apiKey`, à obtenir sur
+  https://prim.iledefrance-mobilites.fr/[prim.iledefrance-mobilites.fr]) pour IDF
+  Mobilités / RATP.
+. **Arrêt** — recherche par nom (ex. « Gaîté »), puis sélection dans la liste des
+  résultats : plusieurs arrêts physiques peuvent porter le même nom (bus/métro/tram
+  distingués, ex. « Gaîté — Paris 14e (métro) » vs « Gaîté — Clamart (bus) »).
+  _(IDF Mobilités / RATP uniquement)_ Si l'arrêt choisi appartient à un pôle multimodal
+  (zone de correspondance IDFM `zdcid` partagée avec d'autres arrêts, ex. quais bus +
+  métro d'une même place), une étape supplémentaire propose de **regrouper tout le pôle
+  dans un seul capteur** plutôt que de ne suivre que ce quai précis. Purement opt-in ;
+  sans pôle détecté, cette étape n'apparaît pas.
+. **Ligne(s)** _(facultatif)_ — sélection multiple : cocher un sous-ensemble des lignes
+  qui circulent à cet arrêt (chaque ligne cochée produit son propre capteur), ou ne rien
+  cocher pour suivre toutes les lignes. Les lignes proposées sont celles qui circulent au
+  moment de la configuration (sondage temps réel de l'API). Ce choix ne se règle qu'à la
+  création de l'entrée — il ne se modifie pas via les Options.
+. **Sens** _(facultatif)_ — pour ne suivre qu'un sens de circulation (les 2 sens réels de
+  la ligne, ex. « Châtillon Montrouge » vs « Asnières… / Saint-Denis… »), ou « Les deux
+  sens (2 capteurs) » pour créer d'emblée un capteur par sens plutôt qu'un seul capteur
+  non filtré. Le sens est déterminé par le `DirectionRef` SIRI, pas par le terminus : une
+  ligne fourchue (ex. métro 13) a plusieurs terminus pour un même sens, tous regroupés.
+
+Le filtre ligne/sens est **modifiable après coup** sans supprimer l'arrêt : *Paramètres →
+Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*.
+
+Une entrée de configuration = un arrêt suivi (éventuellement restreint à une ligne / un sens).
+
+== 🚶 Temps pour rejoindre l'arrêt
+
+Optionnel, réglable dans les Options de l'entrée (*Temps pour rejoindre l'arrêt (min)*).
+Change le **sens de l'état** du capteur : au lieu de l'heure d'arrivée brute du prochain
+passage, l'état devient **« dans combien de temps partir »** pour l'attraper — (minutes du
+prochain passage encore rattrapable) − ce temps de marche. Un passage à 20 min avec un
+temps de marche de 8 min affiche un état `12`. Un passage trop proche pour être rattrapé
+n'apparaît plus comme état (mais reste listé dans `next_times`/`next_passages`, qui gardent
+toujours les **heures d'arrivée réelles**, non décalées). Aucun passage rattrapable → état
+`unknown`. Une valeur à `0` (par défaut) restaure le comportement d'origine : état = heure
+d'arrivée brute.
+
+Sur une entrée à plusieurs capteurs (plusieurs lignes/sens), une étape avancée permet de
+**surcharger ce réglage par capteur** plutôt que de subir le même temps de marche pour
+tous — utile quand les quais ne sont pas à la même distance du point de départ.
+
+== ⏱️ Fréquence de rafraîchissement et quota d'API
+
+Par défaut, le capteur est rafraîchi **toutes les 60 secondes**, avec un **créneau de
+silence de 23:00 à 07:00** (heure locale de Home Assistant) : pendant ce créneau aucun
+appel n'est émis et la dernière valeur connue est conservée. Fréquence (de 1 s à 10 min,
+valeur libre — le sélecteur propose des présets usuels mais accepte n'importe quel entier
+de secondes dans cette plage) et créneau de silence sont modifiables : *Paramètres →
+Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*. Le formulaire
+affiche l'estimation du volume quotidien pour le réglage choisi et **refuse un réglage qui
+dépasserait le quota** effectif du jeton.
+
+WARNING: **Le quota d'API est compté par token, pas par intégration** : un même token peut
+alimenter plusieurs instances HA et d'autres clients. Et un appel est émis **par code
+d'arrêt et par cycle** — une entrée « les deux sens » (CTS) ou un pôle multimodal à N quais
+multiplie d'autant.
+
+[cols="3,1,1,1"]
+|===
+| Configuration | Appels/cycle | 60 s, 24 h/24 | 60 s, silence 23:00–07:00
+
+| 1 arrêt simple | 1 | 1 440/jour | 960/jour
+| « Les deux sens » (CTS) | 2 | 2 880/jour | 1 920/jour
+| Pôle à N quais | N | 1 440 × N | 960 × N
+|===
+
+Pour PRIM (IDF Mobilités / RATP), le quota contractuel est de **1 000 requêtes/jour** pour
+un jeton généré entre le 13/03 et septembre 2024 (« nouvel utilisateur » — un jeton plus
+ancien monte à 1 000 000/jour) ; source :
+https://prim.iledefrance-mobilites.fr/fr/apis/idfm-ivtr-requete_unitaire[fiche officielle
+de l'API], section « Accès à l'API », consultée le 2026-08-20. Le créneau de silence
+nocturne par défaut ramène un arrêt simple à 60 s sous ce palier. Pas de chiffre
+équivalent trouvé pour CTS à ce jour. Pour sonder en continu, mettre le même début et la
+même fin de créneau (ex. `00:00`/`00:00`).
+
+Un **capteur « quota API »** dédié (catégorie diagnostic) expose, quand le producteur le
+fournit dans ses en-têtes (cas de PRIM ; absent sur CTS), le quota quotidien restant. Le
+quota est plafonné par le producteur **par transporteur et par endpoint** (confirmé sur
+PRIM), pas par entrée : plusieurs arrêts PRIM configurés avec le même jeton partagent donc
+**un seul** capteur (`IDF Mobilités / RATP - quota API`) plutôt que d'afficher chacun sa
+propre lecture du même compteur.
+
+La part consommée par cette intégration seule (tous arrêts confondus, pour ce transporteur)
+est exposée par un **second capteur dédié**, `<transporteur> - appels effectués
+aujourd'hui` — plutôt qu'en attribut du premier : un attribut n'a pas d'historique HA
+propre, ce qui empêchait tout graphique de la consommation dans le temps. Ce capteur ne
+dépend pas des en-têtes du producteur (disponible même sur CTS) et repart de zéro à chaque
+changement de jour **ou à chaque redémarrage de Home Assistant** — le compteur n'est pas
+persisté, un redémarrage en cours de journée sous-estime donc le total réel pour le reste
+de la journée.
