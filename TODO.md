@@ -46,25 +46,25 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 
 ## Documentation
 
-- [ ] En-tête README sans auteur ni ligne « Version X.Y.Z, DD/MM/YYYY » (README.md:1-4)
-- [ ] Pas de ligne de version dans le README malgré `manifest.json` à 0.8.2 (README.md:1-4)
-- [ ] Titre H1 avec émoji 📚 non conforme à la charte (README.md:1)
-- [ ] Section « Installation » utilise 🔧 au lieu de 🚀 (README.md:19)
-- [ ] Absence de section « 💻 Utilisation » attendue pour l'archétype applicatif (README.md)
-- [ ] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58)
+- [x] En-tête README sans auteur ni ligne « Version X.Y.Z, DD/MM/YYYY » (README.md:1-4) — auteur + version ajoutés
+- [x] Pas de ligne de version dans le README malgré `manifest.json` à 0.8.2 (README.md:1-4) — même correction
+- [ ] Titre H1 avec émoji 📚 non conforme à la charte (README.md:1) — laissé tel quel : pratique cohérente avec `anki-atomicity`/`nextdns-tools`, écart assumé plutôt que corrigé isolément ici
+- [x] Section « Installation » utilise 🔧 au lieu de 🚀 (README.md:19) — corrigé
+- [x] Absence de section « 💻 Utilisation » attendue pour l'archétype applicatif (README.md) — ajoutée (carte Lovelace, template, automation)
+- [ ] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58) — contenu corrigé (items réellement hors périmètre), mais toujours pas de lien explicite vers ROADMAP.md
 - [ ] Aucune structure Antora : `docs/antora.yml`, `docs/antora-playbook.yml`, pages `.adoc`, `nav.adoc` tous absents (dépôt)
 - [ ] `.gitea/workflows/docs.yml` absent, donc pas de trigger cross-repo doc
 - [ ] `.repo-meta.json` minimal — `category`, `status`, `icon`, `description` absents (.repo-meta.json)
 - [ ] Divergence structurelle avec `freebox-tools` (même catégorie IoT & Hardware, lui a une doc Antora complète)
-- [ ] README, section « Hors périmètre » : « Intervalle de rafraîchissement configurable » est faux — implémenté depuis longtemps (README.md:140 vs README.md:83-93) ; **ROADMAP.md:58 porte la même erreur** (item non coché sous 🟢 Priorité basse alors que livré)
-- [ ] Offset de temps de marche (v0.8.0/0.8.1) totalement absent du README — le sens de l'état du capteur n'est plus documenté (config_flow.py:1071-1105, sensor.py:130-144)
-- [ ] Sélection d'un sous-ensemble de lignes (multi-select) non répercutée dans le README, qui ne décrit que « une ligne ou toutes » (config_flow.py:653, README.md:48-50)
+- [x] README, section « Hors périmètre » : « Intervalle de rafraîchissement configurable » est faux — implémenté depuis longtemps (README.md:140 vs README.md:83-93) ; ROADMAP.md:58 porte la même erreur (item non coché sous 🟢 Priorité basse alors que livré) — les deux corrigés
+- [x] Offset de temps de marche (v0.8.0/0.8.1) totalement absent du README — le sens de l'état du capteur n'est plus documenté (config_flow.py:1071-1105, sensor.py:130-144) — section ajoutée
+- [x] Sélection d'un sous-ensemble de lignes (multi-select) non répercutée dans le README, qui ne décrit que « une ligne ou toutes » (config_flow.py:653, README.md:48-50) — corrigé
 
 ## Sécurité & CI
 
-- [ ] Token API loggé en clair au niveau DEBUG lors de la découverte des arrêts — caviarder `headers`/`auth` avant `_LOGGER.debug` (config_flow.py:370-372)
-- [ ] Aucun dispositif de scan de secrets (`secrets-scan.yml`/`.gitleaks.toml` absents) (.gitea/workflows/)
-- [ ] `hacs.yml` sous `.github/workflows/` à confirmer comme non-doublon d'une CI Gitea attendue (.github/workflows/hacs.yml:1)
+- [x] Token API loggé en clair au niveau DEBUG lors de la découverte des arrêts — caviarder `headers`/`auth` avant `_LOGGER.debug` (config_flow.py:370-372) — corrigé
+- [x] Aucun dispositif de scan de secrets (`secrets-scan.yml`/`.gitleaks.toml` absents) (.gitea/workflows/) — les deux ajoutés depuis les templates du parc
+- [x] `hacs.yml` sous `.github/workflows/` à confirmer comme non-doublon d'une CI Gitea attendue (.github/workflows/hacs.yml:1) — confirmé non-doublon, annoté en commentaire
 
 ## Conception
 
