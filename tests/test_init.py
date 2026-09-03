@@ -5,6 +5,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.public_transports import async_migrate_entry
 from custom_components.public_transports.const import DOMAIN
 from custom_components.public_transports.coordinator import quota_key
 
@@ -180,6 +181,71 @@ async def test_unloading_the_owner_removes_the_quota_sensor_until_something_relo
     states = _quota_states(hass)
     assert len(states) == 1
     assert states[0].state == "unavailable"
+
+
+async def test_migrate_entry_v1_drops_stale_direction_filter(hass):
+    """v1 -> v2 : direction_filter/direction_label carried a terminus (DestinationName),
+    incompatible with the DirectionRef-based filtering introduced in v2 — must be dropped
+    rather than silently misinterpreted as a DirectionRef."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        data={**ENTRY_DATA, "direction_filter": "Vers Illkirch", "direction_label": "Vers Illkirch"},
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 3
+    assert "direction_filter" not in entry.data
+    assert "direction_label" not in entry.data
+    assert entry.data["senses"] == [{
+        "stop_code": "43A",
+        "line_filter": None,
+        "line_name": None,
+        "direction_filter": None,
+        "direction_label": None,
+    }]
+
+
+async def test_migrate_entry_v2_flattens_to_senses(hass):
+    """v2 -> v3 : flat line_filter/stop_code fields become a one-element "senses" list —
+    entry_sense_specs already reads both forms, but the migration must materialize it so
+    no plat/ambiguous field survives."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data={**ENTRY_DATA, "line_filter": "A", "line_name": "Ligne A"},
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 3
+    assert "line_filter" not in entry.data
+    assert "line_name" not in entry.data
+    assert entry.data["senses"] == [{
+        "stop_code": "43A",
+        "line_filter": "A",
+        "line_name": "Ligne A",
+        "direction_filter": None,
+        "direction_label": None,
+    }]
+
+
+async def test_migrate_entry_already_at_v3_is_a_noop(hass):
+    """An entry already on the latest schema must not be rewritten."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=3,
+        data={**ENTRY_DATA, "senses": [{"stop_code": "43A"}]},
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+
+    assert entry.version == 3
+    assert entry.data["senses"] == [{"stop_code": "43A"}]
 
 
 async def test_reloading_the_owning_entry_recreates_the_shared_quota_sensor(hass):
