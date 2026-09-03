@@ -227,3 +227,44 @@ Filtrer uniquement sur `public_transports` noie souvent la vraie erreur sous le 
 logs `DEBUG` du coordinator (rafraîchissement toutes les 60s) — préférer chercher
 `Traceback` avec suffisamment de contexte (`-A60` à `-A80` selon la profondeur de la
 pile HA).
+
+## Pièges applicatifs & d'ergonomie
+
+### « 0 min » de masse la nuit = cache d'heures creuses, pas le réseau
+
+Incident du 2026-09-02 (corrigé en v0.7.4). **Symptôme** : tous les capteurs « prochain
+passage » d'un pôle affichaient « 0 min » la nuit, alors qu'il n'y avait plus de service.
+
+**Cause** : pendant le créneau d'heures creuses (23h→07h par défaut), le coordinator ne
+rappelle plus l'API et re-sert `self.data` — le cache des passages récupérés *avant* la
+coupure. Ces heures d'arrivée finissent toutes dans le passé, et siri-lite plafonne à `0`
+le temps restant négatif (`models.py`, `remaining_time_before_arrival` → `max(0, …)`). La
+valeur en minutes seule ne distingue donc pas « déjà parti » de « arrive maintenant ».
+
+**Résolution** : `coordinator.call_is_reachable(call, min_remaining_seconds=0)` recalcule
+le signe brut du delta depuis `expected_arrival_time` et écarte les passages déjà partis
+dans `PublicTransportsSensor._calls`. Quand plus aucun passage n'est atteignable, le
+capteur repasse à `None` (`unknown`) au lieu de `0`. (Ce même helper, avec un
+`min_remaining_seconds` positif, porte aussi le seuil de temps de marche — cf. `TODO.md`.)
+
+**À retenir** : un « 0 min » simultané sur *plusieurs* capteurs à une heure creuse →
+suspecter d'abord le cache d'heures creuses, pas les données du réseau. Se vérifie sans
+capture d'écran via l'historique HA (`GET /api/history/period/...`) autour de l'heure
+suspecte : capteurs à `unknown` la nuit, puis valeurs numériques au retour du service.
+
+### « Valider » enchaîne parfois une étape au lieu de finaliser (config/options flow)
+
+Le bouton de soumission d'un formulaire de flow HA s'appelle **toujours « Valider »**
+(*Submit*), qu'il **finalise** le flow *ou* qu'il **enchaîne** sur une étape suivante
+(`async_show_form` avec un autre `step_id`). HA ne permet pas de le renommer en
+« Suivant ».
+
+**Conséquence** : une bascule « avancé » qui ouvre une 2ᵉ page au clic sur Valider n'est
+pas intuitive — l'utilisateur croit avoir enregistré. Rencontré en v0.8.0 sur l'étape
+avancée « offset par ligne/sens » (`async_step_walking_advanced`, ouverte depuis
+`async_step_init` quand la case `configure_per_sense` est cochée).
+
+**Contournement retenu** (v0.8.1) : expliciter dans le **libellé du champ** et la
+**description** que « Valider » ouvre une page dédiée, plutôt que passer par
+`async_show_menu` (plus lourd, restructure tout l'écran d'options en menu). Le menu reste
+l'option correcte si l'écran d'options gagne d'autres sous-réglages plus tard.
