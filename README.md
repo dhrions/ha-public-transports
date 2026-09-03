@@ -1,5 +1,8 @@
 # 📚 Public Transports for Home Assistant
 
+Dhrions
+Version 0.8.2, 03/09/2026
+
 > Intégration custom Home Assistant (HACS) affichant les prochains passages de transport
 > en commun à un arrêt configuré, via [siri-lite](https://pypi.org/project/siri-lite/).
 
@@ -16,7 +19,7 @@
   `custom_components` de Home Assistant (ou via HACS), redémarrer, puis ajouter
   l'intégration **Public Transports** depuis les paramètres.
 
-## 🔧 Installation
+## 🚀 Installation
 
 1. Copier `custom_components/public_transports/` dans le dossier `custom_components/` de
    votre installation Home Assistant (ou installer via HACS en ajoutant ce dépôt comme
@@ -45,9 +48,11 @@ L'assistant de configuration guide en plusieurs étapes :
    métro d'une même place), une étape supplémentaire propose de **regrouper tout le pôle
    dans un seul capteur** plutôt que de ne suivre que ce quai précis. Purement opt-in ; sans
    pôle détecté, cette étape n'apparaît pas.
-5. **Ligne** *(facultatif)* — pour ne suivre qu'une ligne précise à cet arrêt, ou
-   « Toutes les lignes ». Les lignes proposées sont celles qui circulent au moment de la
-   configuration (sondage temps réel de l'API).
+5. **Ligne(s)** *(facultatif)* — sélection multiple : cocher un sous-ensemble des lignes
+   qui circulent à cet arrêt (chaque ligne cochée produit son propre capteur), ou ne rien
+   cocher pour suivre toutes les lignes. Les lignes proposées sont celles qui circulent au
+   moment de la configuration (sondage temps réel de l'API). Ce choix ne se règle qu'à la
+   création de l'entrée — il ne se modifie pas via les Options.
 6. **Sens** *(facultatif)* — pour ne suivre qu'un sens de circulation (les 2 sens réels de
    la ligne, ex. « Châtillon Montrouge » vs « Asnières… / Saint-Denis… »), ou « Les deux
    sens (2 capteurs) » pour créer d'emblée un capteur par sens plutôt qu'un seul capteur
@@ -58,6 +63,22 @@ Le filtre ligne/sens est **modifiable après coup** sans supprimer l'arrêt : *P
 Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*.
 
 Une entrée de configuration = un arrêt suivi (éventuellement restreint à une ligne / un sens).
+
+### 🚶 Temps pour rejoindre l'arrêt
+
+Optionnel, réglable dans les Options de l'entrée (*Temps pour rejoindre l'arrêt (min)*).
+Change le **sens de l'état** du capteur : au lieu de l'heure d'arrivée brute du prochain
+passage, l'état devient **« dans combien de temps partir »** pour l'attraper — (minutes du
+prochain passage encore rattrapable) − ce temps de marche. Un passage à 20 min avec un
+temps de marche de 8 min affiche un état `12`. Un passage trop proche pour être rattrapé
+n'apparaît plus comme état (mais reste listé dans `next_times`/`next_passages`, qui gardent
+toujours les **heures d'arrivée réelles**, non décalées). Aucun passage rattrapable → état
+`unknown`. Une valeur à `0` (par défaut) restaure le comportement d'origine : état = heure
+d'arrivée brute.
+
+Sur une entrée à plusieurs capteurs (plusieurs lignes/sens), une étape avancée permet de
+**surcharger ce réglage par capteur** plutôt que de subir le même temps de marche pour
+tous — utile quand les quais ne sont pas à la même distance du point de départ.
 
 ## 📡 Capteur
 
@@ -79,6 +100,37 @@ Quand un filtre ligne et/ou sens est appliqué, le **nom du capteur** le reflèt
 les passages du sens choisi. Sans filtre, le nom reste `<nom_arrêt> - prochain passage` et
 tous les passages sont pris en compte. Le terminus précis de chaque rame reste dans
 `next_passages`.
+
+## 💻 Utilisation
+
+Le capteur s'utilise comme n'importe quel capteur numérique Home Assistant — carte
+Lovelace, automation, template. Exemple de carte affichant l'état (temps restant, en
+minutes) et la ligne/destination du prochain passage rattrapable :
+
+```yaml
+type: entities
+entities:
+  - entity: sensor.gaite_prochain_passage
+    name: Prochain métro
+    secondary_info: last-changed
+```
+
+Exemple de template exploitant `next_times` pour afficher les 3 prochains passages sans
+filtrer sur le sens :
+
+```yaml
+{{ state_attr('sensor.gaite_prochain_passage', 'next_times')[:3] | join(', ') }} min
+```
+
+Une automation peut se déclencher sur l'état numérique, par exemple pour notifier quand il
+reste moins de 5 minutes pour partir :
+
+```yaml
+trigger:
+  - platform: numeric_state
+    entity_id: sensor.gaite_prochain_passage
+    below: 5
+```
 
 ## ⏱️ Fréquence de rafraîchissement et quota d'API
 
@@ -137,4 +189,7 @@ la configuration) reste implémentée directement dans cette intégration.
 
 ## 🚧 Hors périmètre actuel
 
-- Intervalle de rafraîchissement configurable.
+- Extension aux réseaux annoncés mais non encore câblés côté API SIRI-lite : TCL (Lyon),
+  RTM (Marseille), Lignes d'Azur (Nice), TBM (Bordeaux).
+- Publication officielle sur HACS (installable uniquement en dépôt personnalisé pour
+  l'instant).

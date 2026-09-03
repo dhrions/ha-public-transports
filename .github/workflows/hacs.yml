@@ -1,3 +1,7 @@
+# Validation HACS store (hacs.json, manifest.json...) via l'action officielle
+# hacs/action, spécifique à GitHub — pas d'équivalent côté Gitea Actions, donc pas un
+# doublon d'une CI attendue en .gitea/workflows/ : ce fichier sert de repli légitime
+# (cf. CLAUDE.md § CI/CD).
 name: HACS Action
 
 on:
