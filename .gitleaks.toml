@@ -1,0 +1,19 @@
+# Configuration gitleaks — copiée automatiquement à la racine du dépôt par `mkrpo`.
+#
+# Étend le ruleset par défaut de gitleaks (ne le remplace pas) : `extend.useDefault`
+# garde toutes les règles intégrées, `[allowlist]` ne fait qu'ajouter des exceptions.
+#
+# 📖 Référence et exemples : repos-meta/SECRET_SCANNING.md
+
+[extend]
+useDefault = true
+
+# Pas de [allowlist] par défaut : une table vide fait échouer gitleaks au chargement
+# ("[[allowlists]] must contain at least one check for: commits, paths, regexes, or
+# stopwords"), donc pire qu'utile. Décommenter uniquement en cas de faux positif réel,
+# avec un commentaire justificatif par entrée :
+#
+# [allowlist]
+# regexes = [
+#   '''AKIAIOSFODNN7EXAMPLE''', # Exemple AWS documenté dans README.adoc, jamais une vraie clé
+# ]
