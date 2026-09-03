@@ -77,6 +77,29 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 - [x] Pas de workflow `audit.yml` (veille `pip-audit`) (.gitea/workflows/) — ajouté, adapté (pas de pyproject.toml ici : pip-audit sur un requirements assemblé depuis manifest.json + requirements.test.txt, écart assumé au template standard)
 - [x] `syrupy` utilisé en plugin pytest sans être déclaré dans `requirements.test.txt` (setup.cfg:18) — déclaré
 
+## Distribution (cf. ROADMAP 🔵)
+
+> Deux voies distinctes, indépendantes l'une de l'autre : le dépôt HACS par défaut
+> (magasin intégré, barre administrative) et Home Assistant Core (livré avec HA, barre
+> technique — cf. blocage ci-dessous). Discuté le 2026-09-03 ; ne pas confondre les deux
+> dans une seule case ROADMAP à cocher globalement.
+
+- [ ] **Dépôt HACS par défaut** : ouvrir une PR sur `home-assistant/brands` avec
+  l'icône/logo pour le domaine `public_transports` (obligatoire, indépendant de HACS —
+  sert aussi si la voie Core est visée un jour), puis une PR d'ajout sur `hacs/default`
+  et passer la validation automatique (action `hacs/action`). Prérequis déjà en place
+  côté dépôt (`hacs.json`, releases taguées via semantic-release, README, manifest
+  conforme).
+
+- [ ] **Home Assistant Core — bloqué en l'état** : Core interdit l'I/O synchrone
+  (`requests`), exige `aiohttp` via `async_get_clientsession`. Vérifié le 2026-09-03 :
+  `siri-lite==0.12.0` (dépendance de ce dépôt) importe `requests` dans `discovery.py`,
+  `web.py`, `http_client.py`, `lines.py`, `icar.py` — entièrement synchrone. Avant toute
+  soumission Core, il faut réécrire `siri-lite` en async (ou l'envelopper), puis viser le
+  Quality Scale (Bronze a minima : `DataUpdateCoordinator`, erreurs typées, pas d'appel
+  bloquant, typing strict, `strings.json` complet). Ne pas soumettre à Core avant ce
+  refactor — pas un point de process, un blocage technique dur.
+
 ## Tests
 
 - [x] `resolve_line_label`/`resolve_line_names` : chemin d'erreur HTTP jamais testé (config_flow.py:178-215, tests/test_config_flow.py:21-22) — 3 tests ajoutés (404, ClientError, succès)
