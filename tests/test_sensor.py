@@ -13,12 +13,10 @@ from custom_components.public_transports.sensor import (
     PublicTransportsSensor,
 )
 
+from .conftest import BASE_ENTRY_DATA
+
 ENTRY_DATA = {
-    "city": "Strasbourg",
-    "transit_company": "Compagnie des Transports Strasbourgeois",
-    "api_token": "fake-token",
-    "stop_name": "Homme de Fer",
-    "stop_code": "43A",
+    **BASE_ENTRY_DATA,
     # Créneau de silence dégénéré (début == fin) = jamais silencieux, pour que la mise en
     # place du capteur ne dépende pas de l'heure d'exécution (créneau nuit par défaut).
     "quiet_hours_start": "00:00:00",

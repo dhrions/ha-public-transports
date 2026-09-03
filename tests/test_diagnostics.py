@@ -11,13 +11,7 @@ from custom_components.public_transports.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 
-ENTRY_DATA = {
-    "city": "Strasbourg",
-    "transit_company": "Compagnie des Transports Strasbourgeois",
-    "api_token": "fake-token",
-    "stop_name": "Homme de Fer",
-    "stop_code": "43A",
-}
+from .conftest import BASE_ENTRY_DATA as ENTRY_DATA
 
 
 async def test_diagnostics_redacts_the_api_token(hass):

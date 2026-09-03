@@ -9,13 +9,7 @@ from custom_components.public_transports import async_migrate_entry
 from custom_components.public_transports.const import DOMAIN
 from custom_components.public_transports.coordinator import quota_key
 
-ENTRY_DATA = {
-    "city": "Strasbourg",
-    "transit_company": "Compagnie des Transports Strasbourgeois",
-    "api_token": "fake-token",
-    "stop_name": "Homme de Fer",
-    "stop_code": "43A",
-}
+from .conftest import BASE_ENTRY_DATA as ENTRY_DATA
 
 
 async def test_async_setup(hass):

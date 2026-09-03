@@ -36,12 +36,10 @@ from custom_components.public_transports.coordinator import (
     spec_walking_time,
 )
 
+from .conftest import BASE_ENTRY_DATA
+
 ENTRY_DATA = {
-    "city": "Strasbourg",
-    "transit_company": "Compagnie des Transports Strasbourgeois",
-    "api_token": "fake-token",
-    "stop_name": "Homme de Fer",
-    "stop_code": "43A",
+    **BASE_ENTRY_DATA,
     # Créneau de silence dégénéré (début == fin) = jamais silencieux. Sans cela, les tests
     # qui appellent _async_update_data dépendraient de l'heure : le créneau nuit par défaut
     # (23:00-07:00) les ferait sauter l'appel API et échouer s'ils tournaient la nuit.
