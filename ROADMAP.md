@@ -55,7 +55,9 @@ Feuille de route de **public_transports for Home Assistant**
 ## 🟢 Priorité basse
 
 ### Personnalisation du suivi
-- [ ] **Intervalle de rafraîchissement configurable** depuis l'UI (actuellement fixe, 60s)
+- [x] **Intervalle de rafraîchissement configurable** depuis l'UI (de 1 s à 10 min, valeur
+  libre — le sélecteur propose des présets usuels mais accepte n'importe quel entier de
+  secondes)
 
 ---
 

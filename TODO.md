@@ -43,3 +43,43 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
   multi-lignes (ex. un pôle type Gaîté), et à l'étape « Ligne(s) » décocher certaines
   lignes. Attendu : seuls les capteurs des lignes cochées sont créés (un par ligne × sens),
   aucun pour les lignes décochées. Tout coché (ou rien) = toutes les lignes.
+
+## Documentation
+
+- [ ] En-tête README sans auteur ni ligne « Version X.Y.Z, DD/MM/YYYY » (README.md:1-4)
+- [ ] Pas de ligne de version dans le README malgré `manifest.json` à 0.8.2 (README.md:1-4)
+- [ ] Titre H1 avec émoji 📚 non conforme à la charte (README.md:1)
+- [ ] Section « Installation » utilise 🔧 au lieu de 🚀 (README.md:19)
+- [ ] Absence de section « 💻 Utilisation » attendue pour l'archétype applicatif (README.md)
+- [ ] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58)
+- [ ] Aucune structure Antora : `docs/antora.yml`, `docs/antora-playbook.yml`, pages `.adoc`, `nav.adoc` tous absents (dépôt)
+- [ ] `.gitea/workflows/docs.yml` absent, donc pas de trigger cross-repo doc
+- [ ] `.repo-meta.json` minimal — `category`, `status`, `icon`, `description` absents (.repo-meta.json)
+- [ ] Divergence structurelle avec `freebox-tools` (même catégorie IoT & Hardware, lui a une doc Antora complète)
+- [ ] README, section « Hors périmètre » : « Intervalle de rafraîchissement configurable » est faux — implémenté depuis longtemps (README.md:140 vs README.md:83-93) ; **ROADMAP.md:58 porte la même erreur** (item non coché sous 🟢 Priorité basse alors que livré)
+- [ ] Offset de temps de marche (v0.8.0/0.8.1) totalement absent du README — le sens de l'état du capteur n'est plus documenté (config_flow.py:1071-1105, sensor.py:130-144)
+- [ ] Sélection d'un sous-ensemble de lignes (multi-select) non répercutée dans le README, qui ne décrit que « une ligne ou toutes » (config_flow.py:653, README.md:48-50)
+
+## Sécurité & CI
+
+- [ ] Token API loggé en clair au niveau DEBUG lors de la découverte des arrêts — caviarder `headers`/`auth` avant `_LOGGER.debug` (config_flow.py:370-372)
+- [ ] Aucun dispositif de scan de secrets (`secrets-scan.yml`/`.gitleaks.toml` absents) (.gitea/workflows/)
+- [ ] `hacs.yml` sous `.github/workflows/` à confirmer comme non-doublon d'une CI Gitea attendue (.github/workflows/hacs.yml:1)
+
+## Conception
+
+- [ ] `config_flow.py` (1127 lignes / 4 responsabilités indépendantes) à scinder en sous-package (config_flow.py:1-1127)
+- [ ] Duplication exacte de `_coordinators` entre deux classes de sensor.py (sensor.py:212-214, 285-287)
+
+## Dépendances
+
+- [ ] Pas de bornage sur `pytest`, `pytest-cov`, `pytest-homeassistant-custom-component` (requirements.test.txt:1-3)
+- [ ] Pas de workflow `audit.yml` (veille `pip-audit`) (.gitea/workflows/)
+- [ ] `syrupy` utilisé en plugin pytest sans être déclaré dans `requirements.test.txt` (setup.cfg:18)
+
+## Tests
+
+- [ ] `resolve_line_label`/`resolve_line_names` : chemin d'erreur HTTP jamais testé (config_flow.py:178-215, tests/test_config_flow.py:21-22)
+- [ ] `probe_available_passages` : comportement d'échec (`try/except`) jamais testé directement, toujours mocké (config_flow.py:111-126, tests/test_config_flow.py:467-743)
+- [ ] `async_migrate_entry` (migrations v1→v2, v2→v3) totalement non testé — risque de casse silencieuse des configs utilisateurs en prod (__init__.py:24-47)
+- [ ] `diagnostics.py` aucun test, y compris la redaction du token (diagnostics.py)
