@@ -1,0 +1,63 @@
+# 🔐 Audit des dépendances (Gitea Actions)
+#
+# Variante du template repos-meta/DEPENDENCY_AUDIT.md pour un dépôt SANS
+# pyproject.toml : ce dépôt est une intégration Home Assistant (custom_component),
+# ses dépendances sont déclarées dans manifest.json (requirements runtime) et
+# requirements.test.txt (dépendances de test), pas via un [build-system]. `pip-audit .`
+# tel que défini par le template échouerait à la résolution faute de build backend —
+# on scanne donc un fichier requirements généré à la volée à partir de ces deux sources.
+#
+# 📖 Référence : repos-meta/DEPENDENCY_AUDIT.md (norme standard, non applicable telle
+# quelle ici) ; écart documenté dans TODO.md.
+
+name: 🔐 Audit des dépendances
+
+on:
+  # Hebdomadaire : une CVE publiée après le dernier commit doit être vue, même sur un
+  # dépôt dormant. Gitea ne planifie que sur la branche par défaut.
+  schedule:
+    - cron: "0 6 * * 1"
+  # Un changement de dépendances mérite un audit immédiat.
+  push:
+    branches: [master]
+    paths:
+      - custom_components/public_transports/manifest.json
+      - requirements.test.txt
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: 🔐 pip-audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # Ne PAS ajouter `cache: pip` : le backend de cache est injoignable depuis le
+          # runner self-hosted -> ~9 min de timeouts TCP silencieux.
+          # Voir repos-meta/CI_CD_ISSUES_AND_SOLUTIONS.md
+
+      - name: 📦 Install pip-audit and jq
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: 📝 Assembler les dépendances (manifest.json + requirements.test.txt)
+        # manifest.json["requirements"] (runtime, ex. requests/siri-lite) et
+        # requirements.test.txt (dépendances de test) ne sont jamais installés
+        # ensemble ailleurs dans ce dépôt — combinés ici uniquement pour l'audit.
+        run: |
+          jq -r '.requirements[]' custom_components/public_transports/manifest.json > audit-requirements.txt
+          cat requirements.test.txt >> audit-requirements.txt
+
+      - name: 🔐 Audit des dépendances
+        # Non bloquant, même politique que le template standard : une CVE dans une
+        # dépendance transitive commune ne doit pas geler ce dépôt à elle seule.
+        # Politique et procédure d'exception : repos-meta/DEPENDENCY_AUDIT.md
+        continue-on-error: true
+        run: pip-audit --desc --progress-spinner=off -r audit-requirements.txt
