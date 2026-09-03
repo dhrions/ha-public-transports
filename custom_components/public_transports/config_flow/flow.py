@@ -4,12 +4,11 @@ follow. The post-setup "re-choose filters" flow lives in options_flow.py.
 
 import logging
 
-import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from ..const import CITIES_DATA, DOMAIN, IDFM_ZONES_API_URL, TRANSIT_COMPANIES
+from ..const import CITIES_DATA, DOMAIN, TRANSIT_COMPANIES
 from ..coordinator import scalar
 from .helpers import (
     BOTH_SENSES,
@@ -17,6 +16,9 @@ from .helpers import (
     _directions_from_calls,
     _lines_from_calls,
     dropdown,
+    fetch_idfm_zones,
+    fetch_idfm_zones_by_zdcid,
+    fetch_stop_names,
     probe_available_passages,
     resolve_line_names,
 )
@@ -146,69 +148,6 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("api_token"): str}),
         )
 
-    async def fetch_stop_names(self):
-        """Fetch the stop names and stop codes for the selected transit company."""
-        transit_info = TRANSIT_COMPANIES.get(self.transit_company, {})
-        stop_names = {}
-
-        api_url = transit_info.get("api_url")
-        endpoint = transit_info.get("endpoint")
-        auth_type = transit_info.get("auth_type")
-
-        if api_url and endpoint:
-            url = f"{api_url}{endpoint}"
-            headers = {}
-            auth = None
-
-            # Configurer l'authentification en fonction du type
-            if auth_type == "Basic Auth":
-                if self.requires_token and self.api_token:
-                    auth = aiohttp.BasicAuth(self.api_token, password='')
-            elif auth_type == "Bearer Token":
-                if self.requires_token and self.api_token:
-                    headers["Authorization"] = f"Bearer {self.api_token}"
-            elif auth_type == "apiKey":
-                if self.requires_token and self.api_token:
-                    headers["apiKey"] = self.api_token
-            elif auth_type == "None":
-                pass
-            else:
-                _LOGGER.error(f"Unknown auth_type: {auth_type}")
-
-            _LOGGER.debug(f"Making API request to: {url}")
-            _LOGGER.debug(f"Headers keys: {list(headers.keys())}")
-            _LOGGER.debug(f"Auth configured: {auth is not None}")
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, headers=headers, auth=auth) as response:
-                        _LOGGER.debug(f"Received response with status: {response.status}")
-                        if response.status == 200:
-                            data = await response.json()
-                            _LOGGER.debug(f"Response JSON: {data}")
-                            stops = data.get("StopPointsDelivery", {}).get("AnnotatedStopPointRef", [])
-
-                            # Collect stop names and associated codes
-                            for stop in stops:
-                                stop_name = stop.get("StopName")
-                                stop_code = stop.get("Extension", {}).get("StopCode")
-                                if stop_name:
-                                    if stop_name not in stop_names:
-                                        stop_names[stop_name] = []
-                                    stop_names[stop_name].append(stop_code)
-                        else:
-                            _LOGGER.error(f"Failed to fetch stops: {response.status}")
-            except aiohttp.ClientError as err:
-                _LOGGER.error(f"HTTP error occurred: {err}")
-        else:
-            _LOGGER.warning("No stop list endpoint found for this company.")
-
-        _LOGGER.debug(f"Fetched stop names and codes: {stop_names}")
-
-        # Convert stop_names dictionary to a sorted list of tuples (stop_name, [stop_codes])
-        sorted_stop_names = sorted(stop_names.items())
-        return sorted_stop_names
-
     async def async_step_get_stop(self, user_input=None):
         """Handle the step where the user inputs a stop name."""
         transit_info = TRANSIT_COMPANIES.get(self.transit_company, {})
@@ -221,7 +160,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # sens/quai (ex. "Barr" -> 43A ET 43B). On ne choisit pas le code ici : tous les
         # candidats sont sondés (async_step_filters), et le bon code sera fixé
         # automatiquement une fois le sens choisi (async_step_select_direction).
-        self.stop_names = await self.fetch_stop_names()
+        self.stop_names = await fetch_stop_names(self.transit_company, self.requires_token, self.api_token)
         stop_options = {name: name for name, codes in self.stop_names}
 
         if user_input is not None:
@@ -242,61 +181,13 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def _query_idfm_zones(self, where, limit):
-        """Run a raw query against the public IDFM 'zones-d-arrets' referential.
-
-        Shared by fetch_idfm_zones (search by name) and fetch_idfm_zones_by_zdcid
-        (lookup pole siblings) — same public, unauthenticated dataset, only the filter
-        differs.
-        """
-        params = {"where": where, "limit": limit}
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(IDFM_ZONES_API_URL, params=params) as response:
-                    if response.status != 200:
-                        _LOGGER.error(f"Failed to query IDFM zones: {response.status}")
-                        return []
-                    data = await response.json()
-        except aiohttp.ClientError as err:
-            _LOGGER.error(f"HTTP error occurred while querying IDFM zones: {err}")
-            return []
-
-        return [
-            {
-                "zdaid": result["zdaid"],
-                "zdaname": result["zdaname"],
-                "zdatown": result.get("zdatown", ""),
-                "zdatype": result.get("zdatype", ""),
-                "zdcid": result.get("zdcid"),
-            }
-            for result in data.get("results", [])
-        ]
-
-    async def fetch_idfm_zones(self, query):
-        """Search the public IDFM 'zones-d-arrets' referential by stop name.
-
-        Public, unauthenticated dataset. zdaid maps directly to the SIRI StopArea
-        MonitoringRef (STIF:StopArea:SP:<zdaid>:) used by stop-monitoring — verified
-        manually against STIF:StopArea:SP:45102: (Châtelet - Les Halles). This sidesteps
-        stoppoints-discovery, which IDFM does not expose on the PRIM product used here
-        (see the discovery_backend comment in const.py).
-        """
-        return await self._query_idfm_zones(f'zdaname like "{query}"', 25)
-
-    async def fetch_idfm_zones_by_zdcid(self, zdcid):
-        """List every zone sharing a correspondence pole (zdcid) — the sibling stops of
-        a multimodal hub (ex. bus + metro platforms of the same place), for the pole
-        opt-in step. PRIM-only: zdcid has no CTS equivalent.
-        """
-        return await self._query_idfm_zones(f'zdcid="{zdcid}"', 25)
-
     async def async_step_get_stop_search(self, user_input=None):
         """Ask for a stop name to search, for companies using the idfm_zones backend."""
         errors = {}
 
         if user_input is not None:
             query = user_input.get("query", "")
-            self.zone_matches = await self.fetch_idfm_zones(query)
+            self.zone_matches = await fetch_idfm_zones(query)
             if self.zone_matches:
                 return await self.async_step_get_stop_select()
             errors["query"] = "no_search_results"
@@ -334,7 +225,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 zdcid = zone.get("zdcid")
                 if zdcid:
-                    siblings = await self.fetch_idfm_zones_by_zdcid(zdcid)
+                    siblings = await fetch_idfm_zones_by_zdcid(zdcid)
                     self.pole_zones = [z for z in siblings if z["zdaid"] != zdaid]
                     if self.pole_zones:
                         return await self.async_step_pole_confirm()

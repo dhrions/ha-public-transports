@@ -16,7 +16,12 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from ..const import IDFM_LINES_API_URL, MAX_WALKING_TIME_MINUTES, TRANSIT_COMPANIES
+from ..const import (
+    IDFM_LINES_API_URL,
+    IDFM_ZONES_API_URL,
+    MAX_WALKING_TIME_MINUTES,
+    TRANSIT_COMPANIES,
+)
 from ..coordinator import build_siri_client, scalar
 
 def dropdown(options, mode=None, custom_value=False, multiple=False):
@@ -194,3 +199,118 @@ async def resolve_line_names(hass, lines):
             if human_name:
                 resolved[line_ref] = human_name
     return resolved
+
+
+async def fetch_stop_names(transit_company, requires_token, api_token):
+    """Fetch the stop names and stop codes for the selected transit company."""
+    transit_info = TRANSIT_COMPANIES.get(transit_company, {})
+    stop_names = {}
+
+    api_url = transit_info.get("api_url")
+    endpoint = transit_info.get("endpoint")
+    auth_type = transit_info.get("auth_type")
+
+    if api_url and endpoint:
+        url = f"{api_url}{endpoint}"
+        headers = {}
+        auth = None
+
+        # Configurer l'authentification en fonction du type
+        if auth_type == "Basic Auth":
+            if requires_token and api_token:
+                auth = aiohttp.BasicAuth(api_token, password='')
+        elif auth_type == "Bearer Token":
+            if requires_token and api_token:
+                headers["Authorization"] = f"Bearer {api_token}"
+        elif auth_type == "apiKey":
+            if requires_token and api_token:
+                headers["apiKey"] = api_token
+        elif auth_type == "None":
+            pass
+        else:
+            _LOGGER.error(f"Unknown auth_type: {auth_type}")
+
+        _LOGGER.debug(f"Making API request to: {url}")
+        _LOGGER.debug(f"Headers keys: {list(headers.keys())}")
+        _LOGGER.debug(f"Auth configured: {auth is not None}")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, auth=auth) as response:
+                    _LOGGER.debug(f"Received response with status: {response.status}")
+                    if response.status == 200:
+                        data = await response.json()
+                        _LOGGER.debug(f"Response JSON: {data}")
+                        stops = data.get("StopPointsDelivery", {}).get("AnnotatedStopPointRef", [])
+
+                        # Collect stop names and associated codes
+                        for stop in stops:
+                            stop_name = stop.get("StopName")
+                            stop_code = stop.get("Extension", {}).get("StopCode")
+                            if stop_name:
+                                if stop_name not in stop_names:
+                                    stop_names[stop_name] = []
+                                stop_names[stop_name].append(stop_code)
+                    else:
+                        _LOGGER.error(f"Failed to fetch stops: {response.status}")
+        except aiohttp.ClientError as err:
+            _LOGGER.error(f"HTTP error occurred: {err}")
+    else:
+        _LOGGER.warning("No stop list endpoint found for this company.")
+
+    _LOGGER.debug(f"Fetched stop names and codes: {stop_names}")
+
+    # Convert stop_names dictionary to a sorted list of tuples (stop_name, [stop_codes])
+    sorted_stop_names = sorted(stop_names.items())
+    return sorted_stop_names
+
+
+async def _query_idfm_zones(where, limit):
+    """Run a raw query against the public IDFM 'zones-d-arrets' referential.
+
+    Shared by fetch_idfm_zones (search by name) and fetch_idfm_zones_by_zdcid
+    (lookup pole siblings) — same public, unauthenticated dataset, only the filter
+    differs.
+    """
+    params = {"where": where, "limit": limit}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(IDFM_ZONES_API_URL, params=params) as response:
+                if response.status != 200:
+                    _LOGGER.error(f"Failed to query IDFM zones: {response.status}")
+                    return []
+                data = await response.json()
+    except aiohttp.ClientError as err:
+        _LOGGER.error(f"HTTP error occurred while querying IDFM zones: {err}")
+        return []
+
+    return [
+        {
+            "zdaid": result["zdaid"],
+            "zdaname": result["zdaname"],
+            "zdatown": result.get("zdatown", ""),
+            "zdatype": result.get("zdatype", ""),
+            "zdcid": result.get("zdcid"),
+        }
+        for result in data.get("results", [])
+    ]
+
+
+async def fetch_idfm_zones(query):
+    """Search the public IDFM 'zones-d-arrets' referential by stop name.
+
+    Public, unauthenticated dataset. zdaid maps directly to the SIRI StopArea
+    MonitoringRef (STIF:StopArea:SP:<zdaid>:) used by stop-monitoring — verified
+    manually against STIF:StopArea:SP:45102: (Châtelet - Les Halles). This sidesteps
+    stoppoints-discovery, which IDFM does not expose on the PRIM product used here
+    (see the discovery_backend comment in const.py).
+    """
+    return await _query_idfm_zones(f'zdaname like "{query}"', 25)
+
+
+async def fetch_idfm_zones_by_zdcid(zdcid):
+    """List every zone sharing a correspondence pole (zdcid) — the sibling stops of
+    a multimodal hub (ex. bus + metro platforms of the same place), for the pole
+    opt-in step. PRIM-only: zdcid has no CTS equivalent.
+    """
+    return await _query_idfm_zones(f'zdcid="{zdcid}"', 25)
