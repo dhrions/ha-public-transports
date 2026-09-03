@@ -79,7 +79,7 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 
 ## Tests
 
-- [ ] `resolve_line_label`/`resolve_line_names` : chemin d'erreur HTTP jamais testé (config_flow.py:178-215, tests/test_config_flow.py:21-22)
-- [ ] `probe_available_passages` : comportement d'échec (`try/except`) jamais testé directement, toujours mocké (config_flow.py:111-126, tests/test_config_flow.py:467-743)
-- [ ] `async_migrate_entry` (migrations v1→v2, v2→v3) totalement non testé — risque de casse silencieuse des configs utilisateurs en prod (__init__.py:24-47)
-- [ ] `diagnostics.py` aucun test, y compris la redaction du token (diagnostics.py)
+- [x] `resolve_line_label`/`resolve_line_names` : chemin d'erreur HTTP jamais testé (config_flow.py:178-215, tests/test_config_flow.py:21-22) — 3 tests ajoutés (404, ClientError, succès)
+- [x] `probe_available_passages` : comportement d'échec (`try/except`) jamais testé directement, toujours mocké (config_flow.py:111-126, tests/test_config_flow.py:467-743) — 2 tests ajoutés, sans mocker la fonction elle-même
+- [x] `async_migrate_entry` (migrations v1→v2, v2→v3) totalement non testé — risque de casse silencieuse des configs utilisateurs en prod (__init__.py:24-47) — 3 tests ajoutés (v1→v3, v2→v3, no-op déjà à jour)
+- [x] `diagnostics.py` aucun test, y compris la redaction du token (diagnostics.py) — tests/test_diagnostics.py créé, 4 tests, module à 100 % de couverture
