@@ -1,4 +1,8 @@
 {
   "title": "public_transports for Home Assistant",
+  "description": "Intégration custom Home Assistant affichant les prochains passages de transport en commun à un arrêt configuré (CTS, IDF Mobilités / RATP)",
+  "category": "IoT & Hardware",
+  "status": "active",
+  "icon": "🚌",
   "image": "ha-public-transports.png"
 }

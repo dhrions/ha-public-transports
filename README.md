@@ -189,6 +189,8 @@ la configuration) reste implémentée directement dans cette intégration.
 
 ## 🚧 Hors périmètre actuel
 
+Détail et priorité de ces chantiers : [ROADMAP.md](ROADMAP.md).
+
 - Extension aux réseaux annoncés mais non encore câblés côté API SIRI-lite : TCL (Lyon),
   RTM (Marseille), Lignes d'Azur (Nice), TBM (Bordeaux).
 - Publication officielle sur HACS (installable uniquement en dépôt personnalisé pour
