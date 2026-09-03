@@ -85,7 +85,7 @@
     "step": {
       "init": {
         "title": "Filtre ligne / sens",
-        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Temps pour rejoindre l'arrêt (facultatif) : les passages qui partent avant ce délai sont masqués, pour ne voir que ceux que vous pouvez encore attraper (0 = désactivé). Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Cochez « Régler l'offset par ligne/sens » pour un délai différent selon le capteur. Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
+        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Temps pour rejoindre l'arrêt (facultatif) : les passages qui partent avant ce délai sont masqués, pour ne voir que ceux que vous pouvez encore attraper (0 = désactivé). Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Pour un délai différent selon le capteur, cochez « Régler l'offset par ligne/sens » puis Valider : une page dédiée s'ouvrira. Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
         "data": {
           "line": "Ligne",
           "direction": "Sens",
@@ -93,7 +93,7 @@
           "walking_time": "Temps pour rejoindre l'arrêt (min)",
           "quiet_hours_start": "Début du créneau de silence",
           "quiet_hours_end": "Fin du créneau de silence",
-          "configure_per_sense": "Régler l'offset par ligne/sens (avancé)"
+          "configure_per_sense": "Régler l'offset par ligne/sens — ouvre une page dédiée (avancé)"
         }
       },
       "walking_advanced": {

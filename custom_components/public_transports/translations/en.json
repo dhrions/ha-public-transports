@@ -85,7 +85,7 @@
     "step": {
       "init": {
         "title": "Line / direction filter",
-        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything. Time to reach the stop (optional): passages leaving sooner than this are hidden, so you only see the ones you can still catch (0 = disabled). Quiet hours (optional): no request is sent between these two times (ex. at night). Tick \"Set the offset per line/direction\" for a different time per sensor. Current frequency: about {estimate} requests/day{limit_text}.",
+        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything. Time to reach the stop (optional): passages leaving sooner than this are hidden, so you only see the ones you can still catch (0 = disabled). Quiet hours (optional): no request is sent between these two times (ex. at night). For a different time per sensor, tick \"Set the offset per line/direction\" then Submit: a dedicated page will open. Current frequency: about {estimate} requests/day{limit_text}.",
         "data": {
           "line": "Line",
           "direction": "Direction",
@@ -93,7 +93,7 @@
           "walking_time": "Time to reach the stop (min)",
           "quiet_hours_start": "Quiet hours start",
           "quiet_hours_end": "Quiet hours end",
-          "configure_per_sense": "Set the offset per line/direction (advanced)"
+          "configure_per_sense": "Set the offset per line/direction — opens a dedicated page (advanced)"
         }
       },
       "walking_advanced": {
