@@ -40,6 +40,17 @@ SCAN_INTERVAL_OPTIONS = {
 MIN_SCAN_INTERVAL_SECONDS = 1
 MAX_SCAN_INTERVAL_SECONDS = 600
 
+# Temps de trajet (minutes) pour rejoindre l'arrêt, éditable par entrée via les Options.
+# 0 (défaut) = pas de filtre : le capteur montre le tout prochain passage. Une valeur
+# positive masque les passages qui arrivent trop tôt pour être attrapés, pour que l'état
+# reflète le prochain passage réellement rattrapable. N'induit aucun appel API (filtrage
+# purement local à l'affichage).
+DEFAULT_WALKING_TIME_MINUTES = 0
+# Plafond appliqué à la LECTURE (comme les bornes de scan_interval) : une valeur éditée à
+# la main dans .storage ne peut pas dépasser ça ni passer négative. 60 min : au-delà, ce
+# n'est plus « mon arrêt ».
+MAX_WALKING_TIME_MINUTES = 60
+
 # Créneau de silence nocturne proposé par défaut (heure locale HA). Pendant ce créneau,
 # aucun appel n'est émis et la dernière donnée connue est conservée. 23:00→07:00 = 8h de
 # silence : à 60 s, un arrêt simple tombe à 16h × 60/h = 960 appels/jour, sous le palier

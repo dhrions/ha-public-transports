@@ -5,14 +5,14 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 
 ## Ergonomie de configuration (cf. ROADMAP 🟠)
 
-- [ ] **Sélection d'un sous-ensemble de lignes** (ex. suivre 2 lignes sur les 5 qui
-  circulent à un arrêt, sans tout suivre ni se limiter à une seule) : le sélecteur ligne
-  du flow (config + options) est aujourd'hui un simple dropdown à choix unique
-  (`vol.Required` + `SelectSelector` sans `multiple=True`). Passer `line` en sélection
-  multiple change `line_filter` d'une chaîne unique vers une liste, ce qui impacte
-  `call_matches()` (coordinator.py, comparaison d'égalité → appartenance à liste) et le
-  filtrage de `PublicTransportsSensor._calls`. Décision à prendre avant implémentation :
-  un sous-ensemble choisi fusionne-t-il en un seul capteur (comme « Toutes les lignes »)
-  ou se découpe-t-il en un capteur par ligne choisie (comme `SPLIT_LINES`, mais restreint
-  au sous-ensemble plutôt qu'à la totalité) ? Signalé par l'utilisateur le 2026-08-22 en
-  répondant à l'implémentation de « Toutes les lignes » sur les pôles multimodaux.
+- [x] **Sélection d'un sous-ensemble de lignes** (ex. suivre 2 lignes sur les 5 qui
+  circulent à un arrêt, sans tout suivre ni se limiter à une seule) : implémenté en
+  passant le step `select_line` en `SelectSelector(multiple=True)` — `line_filter` reste
+  une chaîne unique **par spec**, chaque ligne cochée produisant son propre capteur (comme
+  l'ancien `SPLIT_LINES`, mais restreint aux lignes choisies au lieu de la totalité) ;
+  `call_matches()` n'a donc pas eu besoin de changer. Rien coché = toutes les lignes.
+
+- [x] **Seuil de temps de marche** (masquer les passages trop proches pour être
+  attrapés) : offset en minutes, cascade à 2 niveaux — défaut par entrée
+  (`entry_walking_time`, couvre toute la zone de correspondance sur un pôle) surchargeable
+  par capteur/ligne×sens (`spec_walking_time`, étape avancée des Options). `0` = désactivé.

@@ -51,10 +51,11 @@
         }
       },
       "select_line": {
-        "title": "Ligne (facultatif)",
-        "description": "Choisissez une ligne pour ne suivre que celle-ci, ou « Toutes les lignes, un capteur par ligne » pour toutes les suivre sans jamais perdre l'info de ligne.",
+        "title": "Ligne(s) (facultatif)",
+        "description": "Choisissez la ou les lignes à suivre. Une seule ligne : vous pourrez ensuite préciser le sens. Plusieurs lignes (ou toutes, le choix par défaut) : un capteur par ligne, sans jamais perdre l'info de ligne. Aucune sélection = toutes les lignes.",
         "data": {
-          "line": "Ligne"
+          "line": "Ligne",
+          "lines": "Lignes"
         }
       },
       "select_direction": {
@@ -84,21 +85,28 @@
     "step": {
       "init": {
         "title": "Filtre ligne / sens",
-        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
+        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Temps pour rejoindre l'arrêt (facultatif) : les passages qui partent avant ce délai sont masqués, pour ne voir que ceux que vous pouvez encore attraper (0 = désactivé). Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Cochez « Régler l'offset par ligne/sens » pour un délai différent selon le capteur. Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
         "data": {
           "line": "Ligne",
           "direction": "Sens",
           "scan_interval": "Fréquence de rafraîchissement",
+          "walking_time": "Temps pour rejoindre l'arrêt (min)",
           "quiet_hours_start": "Début du créneau de silence",
-          "quiet_hours_end": "Fin du créneau de silence"
+          "quiet_hours_end": "Fin du créneau de silence",
+          "configure_per_sense": "Régler l'offset par ligne/sens (avancé)"
         }
+      },
+      "walking_advanced": {
+        "title": "Offset par ligne / sens",
+        "description": "Réglez un temps pour rejoindre l'arrêt propre à chaque ligne/sens — une voie ou un sens peut être quelques minutes plus proche ou plus loin. Laissez un champ vide pour hériter du défaut de l'entrée ({default_walking_time} min)."
       }
     },
     "error": {
       "quota_exceeded": "Cette fréquence impliquerait environ {estimate} requêtes/jour{limit_text} — au-delà du quota connu. Choisissez un intervalle plus long ou ajoutez un créneau de silence.",
       "quiet_hours_incomplete": "Renseignez à la fois le début et la fin du créneau de silence, ou laissez les deux vides.",
       "invalid_scan_interval": "La fréquence de rafraîchissement doit être un nombre entier de secondes.",
-      "scan_interval_out_of_range": "La fréquence de rafraîchissement doit être comprise entre {min_scan_interval} et {max_scan_interval} secondes."
+      "scan_interval_out_of_range": "La fréquence de rafraîchissement doit être comprise entre {min_scan_interval} et {max_scan_interval} secondes.",
+      "invalid_walking_time": "Le temps pour rejoindre l'arrêt doit être un nombre entier de minutes (0 à {max_walking_time})."
     }
   }
 }

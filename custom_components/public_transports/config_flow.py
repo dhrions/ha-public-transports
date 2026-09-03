@@ -5,6 +5,10 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -18,22 +22,25 @@ from .const import (
     IDFM_LINES_API_URL,
     IDFM_ZONES_API_URL,
     MAX_SCAN_INTERVAL_SECONDS,
+    MAX_WALKING_TIME_MINUTES,
     MIN_SCAN_INTERVAL_SECONDS,
     SCAN_INTERVAL_OPTIONS,
     TRANSIT_COMPANIES,
 )
 from .coordinator import (
+    _clamp_walking_time,
     build_siri_client,
     entry_quiet_hours,
     entry_scan_interval,
     entry_sense_specs,
     entry_stop_code_count,
+    entry_walking_time,
     estimate_daily_calls,
     scalar,
 )
 
 
-def dropdown(options, mode=None, custom_value=False):
+def dropdown(options, mode=None, custom_value=False, multiple=False):
     """Build a searchable selector from an {value: label} mapping.
 
     Replaces vol.In(...) so long lists (cities, hundreds of CTS stops) get a search box
@@ -46,6 +53,9 @@ def dropdown(options, mode=None, custom_value=False):
     (nor in this repo's pinned test dependency, which has the same gap): calling it
     crashed "Ajouter une entrée" outright with an AttributeError in production
     2026-08-22, since HA moved this to a SelectSelectorConfig flag instead of a mode.
+
+    multiple=True lets the user pick several values at once (the field then returns a
+    list); used by the line step to follow a subset of an stop's lines.
     """
     if mode is None:
         mode = SelectSelectorMode.DROPDOWN
@@ -57,8 +67,26 @@ def dropdown(options, mode=None, custom_value=False):
             ],
             mode=mode,
             custom_value=custom_value,
+            multiple=multiple,
         )
     )
+
+def _walking_time_selector():
+    """A whole-minutes number box for a walking-time offset, bounded to [0, MAX].
+
+    The UI enforces the range; entry_walking_time/spec_walking_time re-clamp at read so a
+    hand-edited .storage value can't escape it either.
+    """
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=0,
+            max=MAX_WALKING_TIME_MINUTES,
+            step=1,
+            mode=NumberSelectorMode.BOX,
+            unit_of_measurement="min",
+        )
+    )
+
 
 # Créez un logger spécifique pour votre intégration
 _LOGGER = logging.getLogger(__name__)
@@ -68,9 +96,6 @@ ALL_LINES = "__all__"
 ALL_DIRECTIONS = "__all__"
 # Sentinelle « les deux sens » : crée une entrée qui expose 2 capteurs (un par sens).
 BOTH_SENSES = "__both__"
-# Sentinelle « une ligne par capteur » : crée une entrée qui expose un capteur par ligne
-# détectée à l'arrêt (sens fusionnés), pour un pôle multimodal (métro + bus + tram...).
-SPLIT_LINES = "__split__"
 
 # Traduction des zdatype du référentiel IDFM zones-d-arrets, pour désambiguïser les
 # arrêts homonymes (ex. "Gaîté" = une station de métro et un arrêt de bus distincts).
@@ -560,11 +585,30 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_select_line()
 
     async def async_step_select_line(self, user_input=None):
-        """Let the user optionally restrict the stop to a single line.
+        """Let the user pick which line(s) of the stop to track.
 
         Skipped (auto-selected) when at most one line is actually circulating — a choice
-        between "cette ligne" et "toutes les lignes" ne veut rien dire s'il n'y en a
-        qu'une.
+        of lines ne veut rien dire s'il n'y en a qu'une.
+
+        On a *splittable* stop — a single physical code, OR a pole whose codes are all
+        known (each sensor re-reads the pole's merged feed, same stop_codes → one shared
+        coordinator, no extra API call, and filters on its own line) — the choice is a
+        multi-select of concrete lines:
+        - exactly one line selected → refine by sense (async_step_select_direction),
+          preserving the précis "un sens / les deux sens" choice for a single-line follow;
+        - several lines (or all — the default) selected → one sensor per (chosen line ×
+          real sense), via _senses_split_by_line restricted to the selection. Selecting
+          every line reproduces the former "toutes les lignes, un capteur par ligne".
+        An empty selection is treated as "toutes les lignes" rather than an error.
+
+        There is deliberately no "toutes les lignes fusionnées" single sensor: an état
+        (minutes avant le prochain passage) mixing several lines without saying which one
+        arrives has no practical value — removed 2026-08-22 on direct user feedback. Every
+        sensor always knows which line it is about.
+
+        On a *non-splittable* stop (an ambiguous CTS stop whose several physical codes are
+        the two senses of one line, not distinct lines) a per-line split has no meaning:
+        the choice stays a single-line dropdown, then async_step_select_direction.
         """
         lines = await resolve_line_names(self.hass, _lines_from_calls(self.available_calls))
 
@@ -576,38 +620,37 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.line_name = None
             return await self.async_step_select_direction()
 
-        # Pas de choix "toutes les lignes fusionnées" : un capteur dont l'état (minutes avant
-        # le prochain passage) mélange plusieurs lignes sans dire laquelle arrive n'a aucune
-        # valeur pratique — retiré le 2026-08-22 sur retour utilisateur direct. Il ne reste
-        # que "une ligne précise" ou "toutes les lignes, un capteur par ligne" (ci-dessous) :
-        # dans les deux cas, chaque capteur sait toujours de quelle ligne il parle.
-        options = dict(lines)
-        # Disponible dès qu'on sait à quels codes physiques rattacher chaque capteur : un code
-        # unique, OU un pôle dont on connaît tous les codes — chaque capteur relit alors le
-        # flux fusionné du pôle (mêmes stop_codes, donc un seul coordinator, aucun appel API
-        # en plus) et se filtre sur sa propre ligne. Exclu du seul cas d'un arrêt CTS ambigu
-        # (plusieurs codes = les deux sens d'UNE ligne, pas plusieurs lignes) : « par ligne »
-        # n'y voudrait rien dire. Étendu aux pôles le 2026-08-22 (avant, seul un code unique
-        # était découpable).
+        # Découpable dès qu'on sait à quels codes physiques rattacher chaque capteur.
+        # Étendu aux pôles le 2026-08-22 (avant, seul un code unique était découpable).
         splittable = len(self.candidate_codes) <= 1 or bool(self.pole_codes)
-        if splittable:
-            options[SPLIT_LINES] = "Toutes les lignes, un capteur par ligne"
+
+        if not splittable:
+            options = dict(lines)
+            if user_input is not None:
+                choice = user_input.get("line")
+                self.line_filter = choice
+                self.line_name = lines.get(choice)
+                return await self.async_step_select_direction()
+            return self.async_show_form(
+                step_id="select_line",
+                data_schema=vol.Schema({vol.Required("line", default=next(iter(options))): dropdown(options)}),
+            )
 
         if user_input is not None:
-            choice = user_input.get("line")
-            if splittable and choice == SPLIT_LINES:
-                self.senses = self._senses_split_by_line(lines)
-                return self._create_entry()
-            self.line_filter = choice
-            self.line_name = lines.get(choice)
-            return await self.async_step_select_direction()
+            chosen = [ref for ref in (user_input.get("lines") or []) if ref in lines]
+            if not chosen:
+                chosen = list(lines)  # rien de coché = toutes les lignes
+            if len(chosen) == 1:
+                self.line_filter, self.line_name = chosen[0], lines[chosen[0]]
+                return await self.async_step_select_direction()
+            self.senses = self._senses_split_by_line({ref: lines[ref] for ref in chosen})
+            return self._create_entry()
 
-        # Par défaut sur "un capteur par ligne" quand elle est proposée : c'est la seule
-        # option qui couvre tout l'arrêt sans jamais perdre l'info de ligne.
-        default = SPLIT_LINES if splittable else next(iter(options))
+        # Défaut : toutes les lignes cochées = l'ancien « un capteur par ligne » par défaut,
+        # la seule option qui couvre tout l'arrêt sans jamais perdre l'info de ligne.
         return self.async_show_form(
             step_id="select_line",
-            data_schema=vol.Schema({vol.Required("line", default=default): dropdown(options)}),
+            data_schema=vol.Schema({vol.Required("lines", default=list(lines)): dropdown(lines, multiple=True)}),
         )
 
     def _senses_split_by_line(self, lines):
@@ -801,6 +844,9 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         """
         self._config_entry = config_entry
         self._probe_rate_limit = None
+        # Options en attente entre l'étape init et l'étape avancée (offset par capteur) :
+        # l'étape avancée les complète avec le walking_time propre à chaque spec.
+        self._pending_options = None
 
     @staticmethod
     def _format_count(value: int) -> str:
@@ -822,10 +868,12 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         return {
             "estimate": self._format_count(estimate),
             "limit_text": limit_text,
-            # Repris par l'erreur scan_interval_out_of_range, jamais affichés hors erreur —
-            # inoffensifs à calculer systématiquement (pas de coût, pas d'appel réseau).
+            # Repris par les erreurs scan_interval_out_of_range / invalid_walking_time,
+            # jamais affichés hors erreur — inoffensifs à calculer systématiquement (pas de
+            # coût, pas d'appel réseau).
             "min_scan_interval": str(MIN_SCAN_INTERVAL_SECONDS),
             "max_scan_interval": str(MAX_SCAN_INTERVAL_SECONDS),
+            "max_walking_time": str(MAX_WALKING_TIME_MINUTES),
         }, estimate, limit_day
 
     async def async_step_init(self, user_input=None):
@@ -873,6 +921,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         # défini — le formulaire le pré-remplit donc, et l'utilisateur peut l'effacer en
         # mettant début == fin (sonde en continu).
         cur_quiet_start, cur_quiet_end = entry_quiet_hours(self.config_entry)
+        cur_walking_time = entry_walking_time(self.config_entry)
 
         if user_input is not None:
             raw_scan_interval = user_input.get("scan_interval", cur_scan_interval)
@@ -881,6 +930,12 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
             except (TypeError, ValueError):
                 scan_interval = None
 
+            raw_walking_time = user_input.get("walking_time", cur_walking_time)
+            try:
+                walking_time = int(raw_walking_time)
+            except (TypeError, ValueError):
+                walking_time = None
+
             quiet_start = (user_input.get("quiet_hours_start") or "").strip() or None
             quiet_end = (user_input.get("quiet_hours_end") or "").strip() or None
             errors = {}
@@ -888,6 +943,8 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                 errors["base"] = "invalid_scan_interval"
             elif not (MIN_SCAN_INTERVAL_SECONDS <= scan_interval <= MAX_SCAN_INTERVAL_SECONDS):
                 errors["base"] = "scan_interval_out_of_range"
+            elif walking_time is None or not (0 <= walking_time <= MAX_WALKING_TIME_MINUTES):
+                errors["base"] = "invalid_walking_time"
             elif bool(quiet_start) != bool(quiet_end):
                 errors["base"] = "quiet_hours_incomplete"
 
@@ -908,6 +965,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                 schema = self._build_schema(
                     line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
                     scan_interval_options, raw_scan_interval, quiet_start or "", quiet_end or "",
+                    raw_walking_time,
                 )
                 return self.async_show_form(
                     step_id="init", data_schema=schema, errors=errors, description_placeholders=placeholders
@@ -938,19 +996,27 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                         "direction_filter": direction_filter,
                         "direction_label": dir_options.get(direction) if direction_filter else None,
                     }]
-            return self.async_create_entry(
-                title="",
-                data={
-                    "senses": new_specs,
-                    "scan_interval": scan_interval,
-                    "quiet_hours_start": quiet_start,
-                    "quiet_hours_end": quiet_end,
-                },
-            )
+
+            options_data = {
+                "senses": new_specs,
+                "scan_interval": scan_interval,
+                "quiet_hours_start": quiet_start,
+                "quiet_hours_end": quiet_end,
+                "walking_time": walking_time,
+            }
+            # Étape avancée facultative : régler l'offset par capteur (ligne × sens),
+            # proposée seulement quand il y a plusieurs capteurs (sinon l'override par sens
+            # équivaudrait au défaut d'entrée). new_specs est passé à l'étape suivante, qui
+            # y greffe le walking_time propre à chaque capteur avant de créer l'entrée.
+            if multi_sense and user_input.get("configure_per_sense"):
+                self._pending_options = options_data
+                return await self.async_step_walking_advanced()
+            return self.async_create_entry(title="", data=options_data)
 
         schema = self._build_schema(
             line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
             scan_interval_options, cur_scan_interval, cur_quiet_start, cur_quiet_end,
+            cur_walking_time,
         )
         placeholders, _estimate, _limit_day = self._estimate_placeholders(
             cur_scan_interval, cur_quiet_start or None, cur_quiet_end or None
@@ -961,6 +1027,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
     def _build_schema(
         line_options, cur_line, dir_options, cur_dir, multi_sense, split_by_line,
         scan_interval_options, cur_scan_interval, cur_quiet_start, cur_quiet_end,
+        cur_walking_time,
     ):
         """Assemble the options form schema — shared by the first render and any
         error re-render, so the user's already-typed values survive a rejection.
@@ -969,6 +1036,10 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         "line" éditable : chaque spec a délibérément sa propre ligne, et un unique
         sélecteur ne peut représenter — ni écraser sans casse — cette diversité. Cf.
         async_step_init pour l'incident que ça a causé le 2026-08-23.
+
+        walking_time (défaut d'entrée) est toujours présent. configure_per_sense (bascule
+        vers l'étape avancée par capteur) n'apparaît que sur une entrée multi-capteurs :
+        sur un capteur unique, un offset par sens ne dirait rien de plus que ce défaut.
         """
         schema = {}
         if not split_by_line:
@@ -982,6 +1053,7 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         schema[vol.Required("scan_interval", default=str(cur_scan_interval))] = dropdown(
             scan_interval_options, custom_value=True
         )
+        schema[vol.Optional("walking_time", default=cur_walking_time)] = _walking_time_selector()
         # Pas de default="" : TimeSelector rejette la chaîne vide à la validation (les
         # deux champs doivent rester réellement absents tant qu'aucun créneau n'est
         # configuré, pas "vides").
@@ -992,4 +1064,64 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         # — TimeSelector() valide en `str` en interne et rejette None avec "expected str".
         schema[start_key] = vol.Any(None, TimeSelector())
         schema[end_key] = vol.Any(None, TimeSelector())
+        if multi_sense:
+            schema[vol.Optional("configure_per_sense", default=False)] = BooleanSelector()
         return vol.Schema(schema)
+
+    async def async_step_walking_advanced(self, user_input=None):
+        """Advanced step: a per-sensor (line × sense) walking-time override.
+
+        Reached from async_step_init only when the user ticked "configure_per_sense" on a
+        multi-sensor entry. Each field is optional: left empty, the sensor inherits the
+        entry-level walking_time (the spec carries no walking_time key); filled, it overrides
+        just that sensor — a platform/direction a few minutes closer or farther.
+
+        Field keys are the sensors' own display labels (disambiguated for uniqueness) rather
+        than opaque indices, so HA renders a legible label per line/sense without needing a
+        translation for a key it can't know in advance.
+        """
+        options_data = self._pending_options
+        specs = options_data["senses"]
+        labels = self._spec_labels(specs)
+
+        if user_input is not None:
+            new_specs = []
+            for spec, label in zip(specs, labels):
+                spec = {k: v for k, v in spec.items() if k != "walking_time"}
+                override = _clamp_walking_time(user_input.get(label))
+                if override is not None:
+                    spec["walking_time"] = override
+                new_specs.append(spec)
+            return self.async_create_entry(title="", data={**options_data, "senses": new_specs})
+
+        schema = {}
+        for spec, label in zip(specs, labels):
+            cur = _clamp_walking_time(spec.get("walking_time"))
+            key = vol.Optional(label, default=cur) if cur is not None else vol.Optional(label)
+            schema[key] = _walking_time_selector()
+        return self.async_show_form(
+            step_id="walking_advanced",
+            data_schema=vol.Schema(schema),
+            description_placeholders={"default_walking_time": str(options_data.get("walking_time") or 0)},
+        )
+
+    @staticmethod
+    def _spec_labels(specs):
+        """One legible, unique label per spec (line + sense), used as the advanced-step
+        field keys. Falls back to "Capteur N" and appends " (N)" to break any collision so
+        two same-named senses stay distinct form fields."""
+        labels, seen = [], {}
+        for index, spec in enumerate(specs):
+            parts = []
+            if spec.get("line_name"):
+                parts.append(str(spec["line_name"]))
+            if spec.get("direction_label"):
+                parts.append(f"→ {spec['direction_label']}")
+            label = " ".join(parts) or f"Capteur {index + 1}"
+            if label in seen:
+                seen[label] += 1
+                label = f"{label} ({seen[label]})"
+            else:
+                seen[label] = 1
+            labels.append(label)
+        return labels

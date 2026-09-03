@@ -1,5 +1,6 @@
 """Tests for the Public Transports sensor entity."""
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -106,6 +107,37 @@ async def test_sensor_state_unknown_when_all_passages_departed(hass):
     state = hass.states.get("sensor.homme_de_fer_prochain_passage")
     assert state is not None
     assert state.state == "unknown"
+
+
+async def test_sensor_walking_time_hides_passages_too_soon_to_catch(hass):
+    """With a walking time set, a passage arriving before that delay is hidden and the state
+    is the next passage the user can actually reach — not the imminent one they'd miss."""
+    now = datetime.now(timezone.utc)
+
+    def at(minutes):
+        return (now + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    calls = [
+        MonitoredCall(stop_point_name="Homme de Fer", expected_arrival_time=at(3),
+                      line_ref="A", published_line_name="Ligne A", destination_name="Illkirch"),
+        MonitoredCall(stop_point_name="Homme de Fer", expected_arrival_time=at(20),
+                      line_ref="A", published_line_name="Ligne A", destination_name="Illkirch"),
+    ]
+
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, options={"walking_time": 10})
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        return_value=calls,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.homme_de_fer_prochain_passage")
+    assert state is not None
+    # Le passage à +3 min (< 10 min de marche) est écarté ; reste celui à ~20 min.
+    assert int(state.state) >= 15
 
 
 def test_build_name_includes_line_and_direction_when_filtered():

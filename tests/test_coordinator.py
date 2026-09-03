@@ -17,20 +17,23 @@ from custom_components.public_transports.const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MAX_SCAN_INTERVAL_SECONDS,
+    MAX_WALKING_TIME_MINUTES,
     MIN_SCAN_INTERVAL_SECONDS,
     TRANSIT_COMPANIES,
 )
 from custom_components.public_transports.coordinator import (
     PublicTransportsDataUpdateCoordinator,
     build_siri_client,
-    call_is_upcoming,
+    call_is_reachable,
     call_matches,
     entry_quiet_hours,
     entry_scan_interval,
     entry_stop_code_count,
+    entry_walking_time,
     estimate_daily_calls,
     scalar,
     spec_stop_codes,
+    spec_walking_time,
 )
 
 ENTRY_DATA = {
@@ -157,25 +160,34 @@ def test_call_matches_accepts_matching_line_and_direction():
     assert call_matches(call, line_filter="13", direction_filter="Aller") is True
 
 
-def test_call_is_upcoming_rejects_departed_passage():
+def test_call_is_reachable_rejects_departed_passage():
     """A passage whose arrival is in the past is already departed — must be dropped, not
     shown as "0 min" (the pre-quiet-hours cache re-served all night, cf. incident nocturne)."""
     now = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
     call = MonitoredCall(expected_arrival_time="2026-09-01T22:50:00+00:00")
-    assert call_is_upcoming(call, now=now) is False
+    assert call_is_reachable(call, now=now) is False
 
 
-def test_call_is_upcoming_accepts_future_passage():
+def test_call_is_reachable_accepts_future_passage():
     now = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
     call = MonitoredCall(expected_arrival_time="2026-09-02T03:05:00+00:00")
-    assert call_is_upcoming(call, now=now) is True
+    assert call_is_reachable(call, now=now) is True
 
 
-def test_call_is_upcoming_keeps_call_with_unparseable_arrival():
+def test_call_is_reachable_keeps_call_with_unparseable_arrival():
     """An absent/unparseable arrival time is kept rather than silently dropped on a
     producer quirk."""
-    assert call_is_upcoming(MonitoredCall(expected_arrival_time=None)) is True
-    assert call_is_upcoming(MonitoredCall(expected_arrival_time="not-a-date")) is True
+    assert call_is_reachable(MonitoredCall(expected_arrival_time=None)) is True
+    assert call_is_reachable(MonitoredCall(expected_arrival_time="not-a-date")) is True
+
+
+def test_call_is_reachable_drops_passage_arriving_before_the_walking_margin():
+    """A positive margin (walking time) drops a passage too close to catch, even though it
+    is still in the future."""
+    now = datetime(2026, 9, 2, 3, 0, tzinfo=timezone.utc)
+    call = MonitoredCall(expected_arrival_time="2026-09-02T03:03:00+00:00")  # dans 3 min
+    assert call_is_reachable(call, 5 * 60, now=now) is False  # 5 min de marche
+    assert call_is_reachable(call, 2 * 60, now=now) is True   # 2 min de marche
 
 
 def test_entry_scan_interval_falls_back_to_default_when_unset():
@@ -213,6 +225,42 @@ def test_entry_scan_interval_clamps_out_of_range(stored, expected_seconds):
 def test_entry_scan_interval_falls_back_on_unparseable_value():
     entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, "scan_interval": "abc"})
     assert entry_scan_interval(entry) == DEFAULT_SCAN_INTERVAL
+
+
+def test_entry_walking_time_defaults_to_zero_when_unset():
+    assert entry_walking_time(_make_entry()) == 0
+
+
+def test_entry_walking_time_reads_from_options():
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, options={"walking_time": 7})
+    assert entry_walking_time(entry) == 7
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [(-3, 0), (99999, MAX_WALKING_TIME_MINUTES), ("abc", 0), (None, 0)],
+)
+def test_entry_walking_time_clamps_or_defaults(stored, expected):
+    """A hand-edited .storage value can't go negative or past the cap; garbage -> 0."""
+    entry = MockConfigEntry(domain=DOMAIN, data={**ENTRY_DATA, "walking_time": stored})
+    assert entry_walking_time(entry) == expected
+
+
+def test_spec_walking_time_prefers_spec_override_over_entry_default():
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, options={"walking_time": 5})
+    assert spec_walking_time(entry, {"walking_time": 12}) == 12
+
+
+def test_spec_walking_time_falls_back_to_entry_default_when_no_override():
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, options={"walking_time": 5})
+    assert spec_walking_time(entry, {"line_filter": "13"}) == 5
+
+
+def test_spec_walking_time_keeps_explicit_zero_override():
+    """An explicit 0 on a spec must override a non-zero entry default, not be read as
+    "unset" (0 is falsy but a legitimate "no margin" choice)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA, options={"walking_time": 5})
+    assert spec_walking_time(entry, {"walking_time": 0}) == 0
 
 
 def test_build_siri_client_uses_apikey_header_for_prim():

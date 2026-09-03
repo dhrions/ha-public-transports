@@ -23,6 +23,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MAX_SCAN_INTERVAL_SECONDS,
+    MAX_WALKING_TIME_MINUTES,
     MIN_SCAN_INTERVAL_SECONDS,
     TRANSIT_COMPANIES,
 )
@@ -160,15 +161,21 @@ def entry_sense_specs(entry: ConfigEntry) -> list[dict]:
     }]
 
 
-def call_is_upcoming(call: MonitoredCall, now=None) -> bool:
-    """Whether a passage's expected arrival is still in the future (not already departed).
+def call_is_reachable(call: MonitoredCall, min_remaining_seconds: int = 0, now=None) -> bool:
+    """Whether a passage is still catchable: its expected arrival is at least
+    min_remaining_seconds in the future.
 
-    siri-lite's extract_remaining_time_before_arrival clamps negatives to 0, so by the
-    minutes value alone a stale passage whose arrival is in the past is indistinguishable
-    from one arriving "now". This recomputes the raw sign from expected_arrival_time to
-    drop already-departed passages — notably the pre-quiet-hours cache re-served untouched
-    all night (cf. _async_update_data), which would otherwise show every line stuck at
-    "0 min" hours after the last real service.
+    min_remaining_seconds=0 (default) just means "not already departed". siri-lite's
+    extract_remaining_time_before_arrival clamps negatives to 0, so by the minutes value
+    alone a stale passage whose arrival is in the past is indistinguishable from one
+    arriving "now"; this recomputes the raw sign from expected_arrival_time to drop
+    already-departed passages — notably the pre-quiet-hours cache re-served untouched all
+    night (cf. _async_update_data), which would otherwise show every line stuck at "0 min"
+    hours after the last real service.
+
+    A positive min_remaining_seconds models the walking/travel time to reach the stop
+    (cf. entry_walking_time): passages arriving sooner than that are dropped so the sensor
+    surfaces the next departure the user can actually make, not one leaving as they set out.
 
     An absent or unparseable arrival time is kept (returns True) rather than silently
     dropped: better a possibly-stale passage than hiding one on a producer quirk.
@@ -178,7 +185,47 @@ def call_is_upcoming(call: MonitoredCall, now=None) -> bool:
         return True
     if now is None:
         now = dt_util.utcnow()
-    return arrival >= now
+    return (arrival - now).total_seconds() >= min_remaining_seconds
+
+
+def entry_walking_time(entry: ConfigEntry) -> int:
+    """Return the entry's walking time (minutes) to reach the stop, clamped to [0, MAX].
+
+    Global to the entry (not per-sensor), like entry_scan_interval. 0 disables the filter.
+    Clamped at read time — not only at form entry — so a value hand-edited in .storage
+    (bypassing the number field) can't go negative or absurdly large. Unparseable values
+    fall back to 0 (no filter).
+    """
+    config = {**entry.data, **entry.options}
+    clamped = _clamp_walking_time(config.get("walking_time"))
+    return clamped if clamped is not None else 0
+
+
+def _clamp_walking_time(raw) -> int | None:
+    """Parse/clamp a raw walking-time value to [0, MAX] minutes, or return the sentinel.
+
+    Returns None (meaning "unset / no value") for a falsy or unparseable input, so a spec
+    override can distinguish "inherit the entry default" (None) from an explicit 0 minutes.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        minutes = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(MAX_WALKING_TIME_MINUTES, minutes))
+
+
+def spec_walking_time(entry: ConfigEntry, spec: dict) -> int:
+    """Effective walking time (minutes) for one sensor: the spec's own override if set,
+    else the entry-level default (entry_walking_time).
+
+    This is the cascade the user configures — an entry-wide default (which, for a pole
+    entry, covers the whole correspondence zone), overridable per sensor (line × sense)
+    because one platform/direction can be a few minutes closer or farther than another.
+    """
+    override = _clamp_walking_time(spec.get("walking_time"))
+    return override if override is not None else entry_walking_time(entry)
 
 
 def call_matches(call: MonitoredCall, line_filter, direction_filter) -> bool:

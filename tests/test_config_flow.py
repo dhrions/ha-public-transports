@@ -11,7 +11,6 @@ from siri_lite.models import MonitoredCall, RateLimitInfo
 from custom_components.public_transports.config_flow import (
     ALL_LINES,
     BOTH_SENSES,
-    SPLIT_LINES,
     PublicTransportsConfigFlow,
     PublicTransportsOptionsFlowHandler,
     _directions_from_calls,
@@ -25,6 +24,14 @@ CALLS_TWO_LINES_TWO_SENSES = [
     MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller", destination_name="Asnières"),
     MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Retour", destination_name="Châtillon Montrouge"),
     MonitoredCall(line_ref="C01384", published_line_name="6", direction_ref="Aller", destination_name="Nation"),
+]
+
+# Trois lignes (une fourchue) pour exercer un vrai sous-ensemble strict au step ligne.
+CALLS_THREE_LINES = [
+    MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller", destination_name="Asnières"),
+    MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Retour", destination_name="Châtillon Montrouge"),
+    MonitoredCall(line_ref="C01384", published_line_name="6", direction_ref="Aller", destination_name="Nation"),
+    MonitoredCall(line_ref="C01385", published_line_name="4", direction_ref="Aller", destination_name="Bagneux"),
 ]
 
 
@@ -136,8 +143,8 @@ def test_codes_from_candidates_filters_by_selected_line():
     assert options == {"43A": "Robertsau"}
 
 
-async def test_select_line_split_lines_creates_one_spec_per_line_and_sense(hass):
-    """SPLIT_LINES ("une ligne par capteur") must fan out per (line x real sense), with a
+async def test_select_line_all_lines_creates_one_spec_per_line_and_sense(hass):
+    """Selecting every line (the default) must fan out per (line x real sense), with a
     single merged spec for lines that only expose one sense — reproduces the manual
     Châtelet-Les Halles test (3 lines, one forked -> N sensors).
     """
@@ -145,7 +152,7 @@ async def test_select_line_split_lines_creates_one_spec_per_line_and_sense(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
     flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
 
-    result = await flow.async_step_select_line({"line": SPLIT_LINES})
+    result = await flow.async_step_select_line({"lines": ["C01383", "C01384"]})
 
     assert result["type"] == "create_entry"
     specs = result["data"]["senses"]
@@ -157,13 +164,11 @@ async def test_select_line_split_lines_creates_one_spec_per_line_and_sense(hass)
     assert line_6_specs[0]["direction_filter"] == "Aller"
 
 
-async def test_select_line_offers_split_on_a_pole_but_never_a_merged_all_lines_choice(hass):
-    """A pole (several physical codes) must offer SPLIT_LINES ("une ligne par capteur").
-    Reproduces the live bug (2026-08-22): the Gaîté pole (5 lines) offered only
-    single-line choices, no way to cover the whole pole at all. ALL_LINES itself must
-    NEVER be offered anywhere (single stop or pole) — a sensor whose state mixes several
-    lines without saying which one is arriving has no practical use (user feedback,
-    2026-08-22): removed everywhere in favor of "one sensor per line".
+async def test_select_line_offers_a_multi_select_of_concrete_lines_never_all_lines(hass):
+    """A splittable stop (single code or pole) must offer a MULTI-select of the concrete
+    lines — the way to cover the whole stop, or a subset, one sensor per line. Reproduces
+    the live bug (2026-08-22): the Gaîté pole offered only single-line choices. ALL_LINES
+    (a merged sensor mixing lines) must NEVER be offered — no practical use (user feedback).
     """
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
@@ -174,16 +179,17 @@ async def test_select_line_offers_split_on_a_pole_but_never_a_merged_all_lines_c
     result = await flow.async_step_select_line()
 
     assert result["type"] == "form"
-    options = result["data_schema"].schema[vol.Required("line")].config["options"]
-    values = {opt["value"] for opt in options}
-    assert SPLIT_LINES in values
+    lines_selector = result["data_schema"].schema[vol.Required("lines")]
+    assert lines_selector.config["multiple"] is True
+    values = {opt["value"] for opt in lines_selector.config["options"]}
+    assert values == {"C01383", "C01384"}
     assert ALL_LINES not in values
 
 
-async def test_select_line_split_lines_on_a_pole_reuses_merged_codes_per_line(hass):
-    """SPLIT_LINES on a pole must fan out per (line x sense) like a single stop, but every
-    spec rereads ALL the pole codes (stop_codes) and filters on its own line — so all specs
-    still share one coordinator (no extra API calls) while each line gets its own sensor(s).
+async def test_select_line_all_lines_on_a_pole_reuses_merged_codes_per_line(hass):
+    """Selecting all lines on a pole must fan out per (line x sense) like a single stop, but
+    every spec rereads ALL the pole codes (stop_codes) and filters on its own line — so all
+    specs still share one coordinator (no extra API calls) while each line gets its sensor(s).
     Reproduces the user's ask (2026-08-22): "2 entités par ligne (1 par sens)" on a pole.
     """
     flow = _flow(hass)
@@ -193,7 +199,7 @@ async def test_select_line_split_lines_on_a_pole_reuses_merged_codes_per_line(ha
     flow.pole_codes = list(pole)
     flow.stop_code = pole[0]
 
-    result = await flow.async_step_select_line({"line": SPLIT_LINES})
+    result = await flow.async_step_select_line({"lines": ["C01383", "C01384"]})
 
     assert result["type"] == "create_entry"
     specs = result["data"]["senses"]
@@ -205,18 +211,44 @@ async def test_select_line_split_lines_on_a_pole_reuses_merged_codes_per_line(ha
     assert len(line_6) == 1 and line_6[0]["direction_filter"] == "Aller"
 
 
-async def test_select_line_picking_one_line_still_works_on_a_pole(hass):
-    """Picking a specific real line (not the removed ALL_LINES, not SPLIT_LINES) must
-    still proceed to sense selection filtered on that one line, same as any multi-sense
-    stop — the ALL_LINES removal must not have broken this unrelated branch.
-    """
+async def test_select_line_subset_splits_only_the_chosen_lines(hass):
+    """A strict subset (2 of 3 lines) must create one sensor per CHOSEN line×sense and
+    leave the unchosen line out entirely — the feature ask (suivre 2 lignes sur 5)."""
+    flow = _flow(hass)
+    flow.available_calls = CALLS_THREE_LINES
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+
+    result = await flow.async_step_select_line({"lines": ["C01383", "C01384"]})
+
+    assert result["type"] == "create_entry"
+    specs = result["data"]["senses"]
+    chosen_lines = {s["line_filter"] for s in specs}
+    assert chosen_lines == {"C01383", "C01384"}  # line 4 (C01385) excluded
+    assert len(specs) == 3  # 13: 2 senses, 6: 1 sense
+
+
+async def test_select_line_empty_selection_is_treated_as_all_lines(hass):
+    """Submitting with nothing ticked must not error — it means "toutes les lignes"."""
+    flow = _flow(hass)
+    flow.available_calls = CALLS_THREE_LINES
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+
+    result = await flow.async_step_select_line({"lines": []})
+
+    assert result["type"] == "create_entry"
+    assert {s["line_filter"] for s in result["data"]["senses"]} == {"C01383", "C01384", "C01385"}
+
+
+async def test_select_line_picking_one_line_still_goes_to_sense_selection(hass):
+    """Selecting exactly ONE line (a single-element list) must proceed to sense selection
+    filtered on that line, preserving the precise "one sense / both senses" choice."""
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
     flow.candidate_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
     flow.pole_codes = ["STIF:StopArea:SP:45102:", "STIF:StopArea:SP:45103:"]
     flow.stop_code = "STIF:StopArea:SP:45102:"
 
-    line_result = await flow.async_step_select_line({"line": "C01383"})
+    line_result = await flow.async_step_select_line({"lines": ["C01383"]})
     assert flow.line_filter == "C01383"
     assert line_result["type"] == "form"
     assert line_result["step_id"] == "select_direction"
@@ -230,23 +262,17 @@ async def test_select_line_picking_one_line_still_works_on_a_pole(hass):
     assert {s["direction_filter"] for s in specs} == {"Aller", "Retour"}
 
 
-async def test_select_line_defaults_to_split_lines_when_available(hass):
-    """No merged "all lines" option left to default to — SPLIT_LINES (the only choice
-    that still covers the whole stop without losing which line each sensor is about)
-    must be the pre-selected default whenever it's offered.
-    """
+async def test_select_line_defaults_to_all_lines_selected(hass):
+    """The lines multi-select must pre-tick every line (the former "un capteur par ligne"
+    default), so validating without change covers the whole stop."""
     flow = _flow(hass)
     flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
     flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
 
     result = await flow.async_step_select_line()
 
-    options = result["data_schema"].schema[vol.Required("line")].config["options"]
-    values = {opt["value"] for opt in options}
-    assert SPLIT_LINES in values
-    assert ALL_LINES not in values
-    line_key = next(k for k in result["data_schema"].schema if k == "line")
-    assert line_key.default() == SPLIT_LINES
+    lines_key = next(k for k in result["data_schema"].schema if k == "lines")
+    assert set(lines_key.default()) == {"C01383", "C01384"}
 
 
 async def test_select_line_skips_form_when_only_one_line(hass):
@@ -597,6 +623,77 @@ async def test_options_flow_saves_valid_quiet_hours(hass):
     assert result["type"] == "create_entry"
     assert result["data"]["quiet_hours_start"] == "22:00:00"
     assert result["data"]["quiet_hours_end"] == "06:00:00"
+
+
+async def test_options_flow_saves_entry_level_walking_time(hass):
+    """The entry-level walking time (offset zone/arrêt) is persisted in options."""
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init({
+            "line": "__all__",
+            "direction": "__all__",
+            "scan_interval": "60",
+            "walking_time": 8,
+        })
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["walking_time"] == 8
+
+
+async def test_options_flow_single_sensor_has_no_per_sense_toggle(hass):
+    """A single-sensor entry offers only the entry-level walking time — a per-sense override
+    would say nothing more than that default, so the advanced toggle is hidden."""
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        result = await flow.async_step_init()
+
+    assert "walking_time" in result["data_schema"].schema
+    assert "configure_per_sense" not in result["data_schema"].schema
+
+
+async def test_options_flow_per_sense_advanced_step_sets_only_the_chosen_spec(hass):
+    """Ticking "configure_per_sense" on a multi-sensor entry routes to the advanced step,
+    where a value on one sensor's field overrides just that spec (the others inherit — no
+    walking_time key)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=SPLIT_BY_LINE_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.probe_available_passages",
+        return_value=([], None),
+    ):
+        advanced = await flow.async_step_init({
+            "scan_interval": "60",
+            "walking_time": 5,
+            "configure_per_sense": True,
+        })
+
+    assert advanced["type"] == "form"
+    assert advanced["step_id"] == "walking_advanced"
+    # Les clés de champ sont les libellés des capteurs (lignes 13 / 58 / 59).
+    assert set(advanced["data_schema"].schema) == {"13", "58", "59"}
+
+    result = await flow.async_step_walking_advanced({"58": 3})
+
+    assert result["type"] == "create_entry"
+    specs = {s["line_name"]: s for s in result["data"]["senses"]}
+    assert specs["58"]["walking_time"] == 3
+    assert "walking_time" not in specs["13"]  # hérite du défaut d'entrée
+    assert "walking_time" not in specs["59"]
+    assert result["data"]["walking_time"] == 5  # défaut d'entrée conservé
 
 
 SPLIT_BY_LINE_ENTRY_DATA = {
