@@ -109,17 +109,21 @@ async def test_sensor_state_unknown_when_all_passages_departed(hass):
     assert state.state == "unknown"
 
 
-async def test_sensor_walking_time_hides_passages_too_soon_to_catch(hass):
-    """With a walking time set, a passage arriving before that delay is hidden and the state
-    is the next passage the user can actually reach — not the imminent one they'd miss."""
+async def test_sensor_walking_time_is_leave_in_time_and_keeps_real_timetable(hass):
+    """With a walking time set, the STATE is "leave in X min" = next reachable passage's
+    arrival minus the walking time (the imminent one the user would miss is skipped). The
+    attributes keep the REAL arrival minutes of every upcoming passage, and the scalar head
+    fields describe the reachable passage (not the imminent one — forked-line correctness).
+    """
     now = datetime.now(timezone.utc)
 
     def at(minutes):
         return (now + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     calls = [
+        # Imminent, trop proche pour être attrapé, terminus différent (ligne fourchue).
         MonitoredCall(stop_point_name="Homme de Fer", expected_arrival_time=at(3),
-                      line_ref="A", published_line_name="Ligne A", destination_name="Illkirch"),
+                      line_ref="A", published_line_name="Ligne A", destination_name="Nation"),
         MonitoredCall(stop_point_name="Homme de Fer", expected_arrival_time=at(20),
                       line_ref="A", published_line_name="Ligne A", destination_name="Illkirch"),
     ]
@@ -136,8 +140,14 @@ async def test_sensor_walking_time_hides_passages_too_soon_to_catch(hass):
 
     state = hass.states.get("sensor.homme_de_fer_prochain_passage")
     assert state is not None
-    # Le passage à +3 min (< 10 min de marche) est écarté ; reste celui à ~20 min.
-    assert int(state.state) >= 15
+    # État = "avant de partir" : ~20 min d'arrivée − 10 min de marche ≈ 10.
+    assert 8 <= int(state.state) <= 11
+    # Attributs = horaire réel : les DEUX passages, heures d'arrivée brutes (3 conservé).
+    next_times = state.attributes["next_times"]
+    assert len(next_times) == 2
+    assert min(next_times) <= 5
+    # Scalaires de tête = le passage rattrapable (20 min → Illkirch), pas l'imminent (Nation).
+    assert state.attributes["destination"] == "Illkirch"
 
 
 def test_build_name_includes_line_and_direction_when_filtered():

@@ -98,40 +98,67 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def _calls(self) -> list[MonitoredCall]:
-        """This sensor's slice of the shared raw feed (filtered by its own spec).
+        """This sensor's slice of the shared raw feed (filtered by its own spec) — the full
+        list of upcoming passages, backing the attributes (next_times / next_passages).
 
-        Also drops passages the user can't (or no longer can) catch, via call_is_reachable
-        with the entry's walking time as margin:
-        - margin 0 (default) drops only already-departed passages — the coordinator
-          re-serves the pre-quiet-hours cache untouched all night, so without this every
-          line would show a stale "0 min" hours after the last real service;
-        - a positive walking time additionally drops passages arriving too soon to reach.
-        Once nothing qualifies, this yields an empty list and the sensor reads None ("no
-        catchable passage") rather than 0.
+        Drops already-departed passages (call_is_reachable with the default margin 0): the
+        coordinator re-serves the pre-quiet-hours cache untouched all night, so without this
+        every line would show a stale "0 min" hours after the last real service. Once every
+        passage is in the past this yields an empty list and the sensor reads None.
+
+        The walking-time offset is deliberately NOT applied here — only to the state
+        (native_value). A passage too imminent to catch stays listed in the attributes (so
+        a dashboard can still surface "there's one in 3 min, but you'd miss it"); only which
+        passage is the headline value changes.
         """
         raw = self.coordinator.data or []
-        margin = spec_walking_time(self._entry, self._spec) * 60
         return [
             call for call in raw
             if call_matches(call, self._spec.get("line_filter"), self._spec.get("direction_filter"))
-            and call_is_reachable(call, margin)
+            and call_is_reachable(call)
         ]
 
     @property
+    def _reachable_call(self) -> MonitoredCall | None:
+        """The first upcoming passage the user can still catch — the one at least the
+        walking time (spec_walking_time) ahead. Drives the state and its scalar attributes.
+        None when no passage is far enough ahead to reach.
+        """
+        margin = spec_walking_time(self._entry, self._spec) * 60
+        return next((c for c in self._calls if call_is_reachable(c, margin)), None)
+
+    @property
     def native_value(self):
-        """Return the remaining time (minutes) before the next matching passage."""
-        calls = self._calls
-        if not calls:
+        """Return the minutes before the user must leave to catch the next reachable
+        passage: that passage's remaining time minus the walking time (spec_walking_time).
+
+        With the default walking time 0 this is just the real arrival minutes (backward
+        compatible). A positive walking time turns the state into "leave in X min" — a
+        passage 20 min away with an 8 min walk reads 12. Passages too soon to reach are
+        skipped (cf. _reachable_call) but stay in the attributes. None when none is reachable.
+        """
+        call = self._reachable_call
+        if call is None:
             return None
-        return calls[0].extract_remaining_time_before_arrival(unit="minutes")
+        remaining = call.extract_remaining_time_before_arrival(unit="minutes")
+        return max(0, remaining - spec_walking_time(self._entry, self._spec))
 
     @property
     def extra_state_attributes(self):
-        """Return additional attributes about the next passages."""
+        """Return additional attributes about the next passages.
+
+        next_times / next_passages list the *real* arrival minutes of every upcoming
+        passage (the objective timetable — the walking offset is not applied to them, so a
+        template can still recompute anything). The scalar head fields (line/destination…)
+        describe the passage the STATE refers to — the reachable one, not necessarily
+        calls[0]: on a forked line, describing the imminent-but-unreachable passage next to
+        a "leave in 12 min" state would show the wrong terminus. Fall back to calls[0] when
+        nothing is reachable (state is None then, but we still describe what's coming).
+        """
         calls = self._calls
         if not calls:
             return {}
-        call = calls[0]
+        call = self._reachable_call or calls[0]
         times = [c.extract_remaining_time_before_arrival(unit="minutes") for c in calls]
         return {
             "stop_code": self._spec.get("stop_code"),

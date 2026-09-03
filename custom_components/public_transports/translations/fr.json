@@ -85,7 +85,7 @@
     "step": {
       "init": {
         "title": "Filtre ligne / sens",
-        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Temps pour rejoindre l'arrêt (facultatif) : les passages qui partent avant ce délai sont masqués, pour ne voir que ceux que vous pouvez encore attraper (0 = désactivé). Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Pour un délai différent selon le capteur, cochez « Régler l'offset par ligne/sens » puis Valider : une page dédiée s'ouvrira. Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
+        "description": "Modifiez la ligne et le sens suivis pour cet arrêt. « Toutes les lignes » / « Tous les sens » suit tout. Temps pour rejoindre l'arrêt (facultatif) : l'état devient « quand partir » — l'heure du prochain passage rattrapable moins ce délai (0 = désactivé). Les attributs gardent les heures réelles. Créneau de silence (facultatif) : aucune requête n'est envoyée entre ces deux heures (ex. la nuit). Pour un délai différent selon le capteur, cochez « Régler l'offset par ligne/sens » puis Valider : une page dédiée s'ouvrira. Fréquence actuelle : environ {estimate} requêtes/jour{limit_text}.",
         "data": {
           "line": "Ligne",
           "direction": "Sens",

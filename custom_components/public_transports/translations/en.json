@@ -85,7 +85,7 @@
     "step": {
       "init": {
         "title": "Line / direction filter",
-        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything. Time to reach the stop (optional): passages leaving sooner than this are hidden, so you only see the ones you can still catch (0 = disabled). Quiet hours (optional): no request is sent between these two times (ex. at night). For a different time per sensor, tick \"Set the offset per line/direction\" then Submit: a dedicated page will open. Current frequency: about {estimate} requests/day{limit_text}.",
+        "description": "Change the line and direction tracked for this stop. \"All lines\" / \"All directions\" tracks everything. Time to reach the stop (optional): the state becomes \"when to leave\" — the next reachable passage's time minus this delay (0 = disabled). The attributes keep the real arrival times. Quiet hours (optional): no request is sent between these two times (ex. at night). For a different time per sensor, tick \"Set the offset per line/direction\" then Submit: a dedicated page will open. Current frequency: about {estimate} requests/day{limit_text}.",
         "data": {
           "line": "Line",
           "direction": "Direction",
