@@ -8,6 +8,8 @@ import voluptuous as vol
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from siri_lite.models import MonitoredCall, RateLimitInfo
 
+import aiohttp
+
 from custom_components.public_transports.config_flow import (
     ALL_LINES,
     BOTH_SENSES,
@@ -15,8 +17,46 @@ from custom_components.public_transports.config_flow import (
     PublicTransportsOptionsFlowHandler,
     _directions_from_calls,
     _lines_from_calls,
+    probe_available_passages,
+    resolve_line_label,
 )
 from custom_components.public_transports.const import DOMAIN
+
+
+class _FakeResponse:
+    """Minimal aiohttp response stand-in, usable as `async with session.get(...)`."""
+
+    def __init__(self, status, data=None):
+        self.status = status
+        self._data = data
+
+    async def json(self):
+        return self._data
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+class _FakeSession:
+    """Minimal aiohttp.ClientSession stand-in for resolve_line_label's HTTP call."""
+
+    def __init__(self, response=None, get_exc=None):
+        self._response = response
+        self._get_exc = get_exc
+
+    def get(self, url, params=None):
+        if self._get_exc:
+            raise self._get_exc
+        return self._response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
 
 # Already-resolved published_line_name (!= line_ref) so resolve_line_names() never calls
 # resolve_line_label() (the only aiohttp-touching path in these steps) — see config_flow.py.
@@ -796,3 +836,76 @@ async def test_user_step_rejects_a_custom_value_not_in_cities_data(hass):
     assert result["type"] == "form"
     assert result["step_id"] == "user"
     assert result["errors"]["base"] == "invalid_city"
+
+
+async def test_probe_available_passages_returns_empty_on_client_error(hass):
+    """probe_available_passages must never let the config flow crash on a probe failure —
+    any exception raised by the underlying SIRI client (network error, bad response...)
+    must be caught and turned into ([], None), not propagated. Unlike the other tests of
+    this file, the function itself is NOT mocked here — its own try/except is what's
+    under test."""
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        side_effect=ConnectionError("boom"),
+    ):
+        calls, rate_limit = await probe_available_passages(
+            hass, "Compagnie des Transports Strasbourgeois", "fake-token", "43A"
+        )
+
+    assert calls == []
+    assert rate_limit is None
+
+
+async def test_probe_available_passages_returns_calls_and_rate_limit_on_success(hass):
+    """Sanity check on the success path, so the error-path test above isn't the only
+    coverage of this function's actual return shape. last_rate_limit is set as a side
+    effect of the real fetch_next_calls (cf. SiriClient), so the fake must set it too
+    rather than only stubbing the return value."""
+    expected_calls = [MonitoredCall(line_ref="A")]
+
+    def _fake_fetch(self):
+        self.last_rate_limit = RateLimitInfo(remaining_day=42)
+        return expected_calls
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        autospec=True,
+        side_effect=_fake_fetch,
+    ):
+        calls, rate_limit = await probe_available_passages(
+            hass, "Compagnie des Transports Strasbourgeois", "fake-token", "43A"
+        )
+
+    assert calls == expected_calls
+    assert rate_limit.remaining_day == 42
+
+
+async def test_resolve_line_label_returns_none_on_non_200_status(hass):
+    """A non-200 response from the IDFM lines dataset must fall back to None (caller then
+    keeps showing the raw LineRef) rather than crash on an unparseable body."""
+    session = _FakeSession(response=_FakeResponse(status=404))
+    with patch("aiohttp.ClientSession", return_value=session):
+        result = await resolve_line_label(hass, "STIF:Line::C01383:")
+
+    assert result is None
+
+
+async def test_resolve_line_label_returns_none_on_client_error(hass):
+    """The only path in these config-flow helpers that touches the network — a connection
+    failure must be caught and turned into None, not propagated to the flow."""
+    session = _FakeSession(get_exc=aiohttp.ClientConnectionError("boom"))
+    with patch("aiohttp.ClientSession", return_value=session):
+        result = await resolve_line_label(hass, "STIF:Line::C01383:")
+
+    assert result is None
+
+
+async def test_resolve_line_label_returns_the_resolved_name_on_success(hass):
+    """Sanity check on the success path, so the two failure-path tests above aren't the
+    only coverage of this function."""
+    data = {"results": [{"route_long_name": "13", "mode": "Metro"}]}
+    session = _FakeSession(response=_FakeResponse(status=200, data=data))
+    with patch("aiohttp.ClientSession", return_value=session):
+        result = await resolve_line_label(hass, "STIF:Line::C01383:")
+
+    assert result == "13 (Metro)"
