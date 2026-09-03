@@ -180,32 +180,27 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class _QuotaRegistryEntity:
-    """Shared access to hass.data[DOMAIN]["_quota_coordinators"][key] — the live registry
-    of coordinators feeding both the quota sensor and the calls-today sensor for a given
-    (company, endpoint) key. Mixed into both, ahead of SensorEntity in the MRO."""
+def _quota_coordinators(hass: HomeAssistant, key: str) -> list[PublicTransportsDataUpdateCoordinator]:
+    """Every coordinator currently sharing this quota key, across all entries.
 
-    def __init__(self, hass: HomeAssistant, key: str) -> None:
-        self._hass = hass
-        self._key = key
-
-    @property
-    def _coordinators(self) -> list[PublicTransportsDataUpdateCoordinator]:
-        """Every coordinator currently sharing this quota key, across all entries."""
-        return self._hass.data[DOMAIN].get("_quota_coordinators", {}).get(self._key, [])
+    Shared by PublicTransportsQuotaSensor and PublicTransportsCallsTodaySensor, which both
+    read hass.data[DOMAIN]["_quota_coordinators"][key] live on every poll rather than a
+    fixed list captured at construction: that list is a shared, cross-entry registry that
+    keeps growing/shrinking as sibling entries (sharing the same token/company) set up or
+    unload, and each sensor must reflect all of them, not just the entry that happened to
+    create it.
+    """
+    return hass.data[DOMAIN].get("_quota_coordinators", {}).get(key, [])
 
 
-class PublicTransportsQuotaSensor(_QuotaRegistryEntity, SensorEntity):
+class PublicTransportsQuotaSensor(SensorEntity):
     """Daily API quota shared by every entry polling the same (company, endpoint) — cf.
     quota_key — plus this integration's own share of it across all of them.
 
-    Reads hass.data[DOMAIN]["_quota_coordinators"][key] live on every poll rather than a
-    fixed list captured at construction: that list is a shared, cross-entry registry that
-    keeps growing/shrinking as sibling entries (sharing the same token/company) set up or
-    unload, and this sensor must reflect all of them, not just the entry that happened to
-    create it. should_poll=True (default interval) instead of per-coordinator listeners,
-    since the underlying reads are cheap in-memory dict/list lookups, not network calls —
-    sidesteps having to re-subscribe listeners whenever a sibling entry joins or leaves.
+    should_poll=True (default interval) instead of per-coordinator listeners, since the
+    underlying reads (cf. _quota_coordinators) are cheap in-memory dict/list lookups, not
+    network calls — sidesteps having to re-subscribe listeners whenever a sibling entry
+    joins or leaves.
     """
 
     _attr_icon = "mdi:gauge"
@@ -218,9 +213,14 @@ class PublicTransportsQuotaSensor(_QuotaRegistryEntity, SensorEntity):
 
     def __init__(self, hass: HomeAssistant, key: str, transit_company: str) -> None:
         """Initialize the quota sensor for one (company, endpoint) key."""
-        super().__init__(hass, key)
+        self._hass = hass
+        self._key = key
         self._attr_unique_id = f"quota_{key}"
         self._attr_name = f"{transit_company} - quota API"
+
+    @property
+    def _coordinators(self) -> list[PublicTransportsDataUpdateCoordinator]:
+        return _quota_coordinators(self._hass, self._key)
 
     @property
     def _rate_limits(self):
@@ -266,7 +266,7 @@ class PublicTransportsQuotaSensor(_QuotaRegistryEntity, SensorEntity):
         }
 
 
-class PublicTransportsCallsTodaySensor(_QuotaRegistryEntity, SensorEntity):
+class PublicTransportsCallsTodaySensor(SensorEntity):
     """Number of API calls made today by this integration, for one (company, endpoint) key.
 
     Shares the same coordinator registry as PublicTransportsQuotaSensor (cf. its docstring)
@@ -285,9 +285,14 @@ class PublicTransportsCallsTodaySensor(_QuotaRegistryEntity, SensorEntity):
 
     def __init__(self, hass: HomeAssistant, key: str, transit_company: str) -> None:
         """Initialize the calls-today sensor for one (company, endpoint) key."""
-        super().__init__(hass, key)
+        self._hass = hass
+        self._key = key
         self._attr_unique_id = f"calls_today_{key}"
         self._attr_name = f"{transit_company} - appels effectués aujourd'hui"
+
+    @property
+    def _coordinators(self) -> list[PublicTransportsDataUpdateCoordinator]:
+        return _quota_coordinators(self._hass, self._key)
 
     @property
     def available(self) -> bool:
