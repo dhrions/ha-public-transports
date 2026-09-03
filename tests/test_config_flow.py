@@ -505,7 +505,7 @@ async def test_options_flow_shows_daily_estimate_on_first_render(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], RateLimitInfo(limit_day=1000000)),
     ):
         result = await flow.async_step_init()
@@ -521,7 +521,7 @@ async def test_options_flow_rejects_projection_exceeding_known_quota(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], RateLimitInfo(limit_day=100)),
     ):
         # 1 requête/seconde, 1 code -> 86 400/jour, largement au-dessus du quota de 100.
@@ -537,7 +537,7 @@ async def test_options_flow_accepts_projection_within_known_quota(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], RateLimitInfo(limit_day=1000000)),
     ):
         result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "60"})
@@ -554,7 +554,7 @@ async def test_options_flow_accepts_custom_scan_interval_outside_preset_list(has
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], RateLimitInfo(limit_day=1000000)),
     ):
         result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "45"})
@@ -569,7 +569,7 @@ async def test_options_flow_rejects_non_numeric_scan_interval(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "abc"})
@@ -584,7 +584,7 @@ async def test_options_flow_rejects_scan_interval_below_minimum(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "0"})
@@ -599,7 +599,7 @@ async def test_options_flow_rejects_scan_interval_above_maximum(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "99999"})
@@ -615,7 +615,7 @@ async def test_options_flow_saves_without_quota_check_when_unknown(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({"line": "__all__", "direction": "__all__", "scan_interval": "1"})
@@ -629,7 +629,7 @@ async def test_options_flow_rejects_incomplete_quiet_hours(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({
@@ -649,7 +649,7 @@ async def test_options_flow_saves_valid_quiet_hours(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({
@@ -672,7 +672,7 @@ async def test_options_flow_saves_entry_level_walking_time(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({
@@ -694,7 +694,7 @@ async def test_options_flow_single_sensor_has_no_per_sense_toggle(hass):
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init()
@@ -712,7 +712,7 @@ async def test_options_flow_per_sense_advanced_step_sets_only_the_chosen_spec(ha
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         advanced = await flow.async_step_init({
@@ -758,7 +758,7 @@ async def test_options_flow_split_by_line_has_no_line_field():
     flow = PublicTransportsOptionsFlowHandler(entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init()
@@ -777,7 +777,7 @@ async def test_options_flow_split_by_line_preserves_each_specs_own_line_filter(h
     flow = _options_flow(hass, entry)
 
     with patch(
-        "custom_components.public_transports.config_flow.probe_available_passages",
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
         return_value=([], None),
     ):
         result = await flow.async_step_init({"scan_interval": "60"})
