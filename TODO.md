@@ -51,11 +51,11 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 - [ ] Titre H1 avec émoji 📚 non conforme à la charte (README.md:1) — laissé tel quel : pratique cohérente avec `anki-atomicity`/`nextdns-tools`, écart assumé plutôt que corrigé isolément ici
 - [x] Section « Installation » utilise 🔧 au lieu de 🚀 (README.md:19) — corrigé
 - [x] Absence de section « 💻 Utilisation » attendue pour l'archétype applicatif (README.md) — ajoutée (carte Lovelace, template, automation)
-- [ ] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58) — contenu corrigé (items réellement hors périmètre), mais toujours pas de lien explicite vers ROADMAP.md
-- [ ] Aucune structure Antora : `docs/antora.yml`, `docs/antora-playbook.yml`, pages `.adoc`, `nav.adoc` tous absents (dépôt)
-- [ ] `.gitea/workflows/docs.yml` absent, donc pas de trigger cross-repo doc
-- [ ] `.repo-meta.json` minimal — `category`, `status`, `icon`, `description` absents (.repo-meta.json)
-- [ ] Divergence structurelle avec `freebox-tools` (même catégorie IoT & Hardware, lui a une doc Antora complète)
+- [x] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58) — contenu corrigé et lien vers ROADMAP.md ajouté
+- [ ] Aucune structure Antora : `docs/antora.yml`, `docs/antora-playbook.yml`, pages `.adoc`, `nav.adoc` tous absents (dépôt) — arbitrage à trancher explicitement (créer la structure vs. assumer un README-only), pas une correction mécanique
+- [ ] `.gitea/workflows/docs.yml` absent, donc pas de trigger cross-repo doc — dépend de l'arbitrage ci-dessus
+- [x] `.repo-meta.json` minimal — `category`, `status`, `icon`, `description` absents (.repo-meta.json) — champs ajoutés (alignés sur `freebox-tools`)
+- [ ] Divergence structurelle avec `freebox-tools` (même catégorie IoT & Hardware, lui a une doc Antora complète) — dépend de l'arbitrage structure Antora ci-dessus
 - [x] README, section « Hors périmètre » : « Intervalle de rafraîchissement configurable » est faux — implémenté depuis longtemps (README.md:140 vs README.md:83-93) ; ROADMAP.md:58 porte la même erreur (item non coché sous 🟢 Priorité basse alors que livré) — les deux corrigés
 - [x] Offset de temps de marche (v0.8.0/0.8.1) totalement absent du README — le sens de l'état du capteur n'est plus documenté (config_flow.py:1071-1105, sensor.py:130-144) — section ajoutée
 - [x] Sélection d'un sous-ensemble de lignes (multi-select) non répercutée dans le README, qui ne décrit que « une ligne ou toutes » (config_flow.py:653, README.md:48-50) — corrigé
@@ -69,13 +69,13 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 ## Conception
 
 - [ ] `config_flow.py` (1127 lignes / 4 responsabilités indépendantes) à scinder en sous-package (config_flow.py:1-1127)
-- [ ] Duplication exacte de `_coordinators` entre deux classes de sensor.py (sensor.py:212-214, 285-287)
+- [x] Duplication exacte de `_coordinators` entre deux classes de sensor.py (sensor.py:212-214, 285-287) — factorisée dans `_QuotaRegistryEntity`
 
 ## Dépendances
 
-- [ ] Pas de bornage sur `pytest`, `pytest-cov`, `pytest-homeassistant-custom-component` (requirements.test.txt:1-3)
-- [ ] Pas de workflow `audit.yml` (veille `pip-audit`) (.gitea/workflows/)
-- [ ] `syrupy` utilisé en plugin pytest sans être déclaré dans `requirements.test.txt` (setup.cfg:18)
+- [x] Pas de bornage sur `pytest`, `pytest-cov`, `pytest-homeassistant-custom-component` (requirements.test.txt:1-3) — planchers ajoutés
+- [ ] Pas de workflow `audit.yml` (veille `pip-audit`) (.gitea/workflows/) — le template du parc suppose un `pyproject.toml` avec `[build-system]` (`pip-audit .`), absent ici (dépôt HA custom_component, deps via `manifest.json`) ; copier tel quel casserait le job, adapter la commande sort de la norme actuelle — à trancher
+- [x] `syrupy` utilisé en plugin pytest sans être déclaré dans `requirements.test.txt` (setup.cfg:18) — déclaré
 
 ## Tests
 
