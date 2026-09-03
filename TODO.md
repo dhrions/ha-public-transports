@@ -68,13 +68,13 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 
 ## Conception
 
-- [ ] `config_flow.py` (1127 lignes / 4 responsabilités indépendantes) à scinder en sous-package (config_flow.py:1-1127)
+- [x] `config_flow.py` (1127 lignes / 4 responsabilités indépendantes) à scinder en sous-package (config_flow.py:1-1127) — scindé en config_flow/{helpers,flow,options_flow}.py, 134/134 tests toujours au vert
 - [x] Duplication exacte de `_coordinators` entre deux classes de sensor.py (sensor.py:212-214, 285-287) — factorisée dans `_QuotaRegistryEntity`
 
 ## Dépendances
 
 - [x] Pas de bornage sur `pytest`, `pytest-cov`, `pytest-homeassistant-custom-component` (requirements.test.txt:1-3) — planchers ajoutés
-- [ ] Pas de workflow `audit.yml` (veille `pip-audit`) (.gitea/workflows/) — le template du parc suppose un `pyproject.toml` avec `[build-system]` (`pip-audit .`), absent ici (dépôt HA custom_component, deps via `manifest.json`) ; copier tel quel casserait le job, adapter la commande sort de la norme actuelle — à trancher
+- [x] Pas de workflow `audit.yml` (veille `pip-audit`) (.gitea/workflows/) — ajouté, adapté (pas de pyproject.toml ici : pip-audit sur un requirements assemblé depuis manifest.json + requirements.test.txt, écart assumé au template standard)
 - [x] `syrupy` utilisé en plugin pytest sans être déclaré dans `requirements.test.txt` (setup.cfg:18) — déclaré
 
 ## Tests
