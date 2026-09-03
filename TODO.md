@@ -48,7 +48,7 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 
 - [x] En-tête README sans auteur ni ligne « Version X.Y.Z, DD/MM/YYYY » (README.md:1-4) — auteur + version ajoutés
 - [x] Pas de ligne de version dans le README malgré `manifest.json` à 0.8.2 (README.md:1-4) — même correction
-- [ ] Titre H1 avec émoji 📚 non conforme à la charte (README.md:1) — laissé tel quel : pratique cohérente avec `anki-atomicity`/`nextdns-tools`, écart assumé plutôt que corrigé isolément ici
+- [x] Titre H1 avec émoji 📚 non conforme à la charte (README.md:1) — corrigé (règle explicite : `conventions-documentation.adoc:333`, « titre sans émoji, l'image de dépôt porte déjà l'identité visuelle » ; sa présence sur d'autres dépôts du parc était une dérive répliquée, pas un précédent à suivre)
 - [x] Section « Installation » utilise 🔧 au lieu de 🚀 (README.md:19) — corrigé
 - [x] Absence de section « 💻 Utilisation » attendue pour l'archétype applicatif (README.md) — ajoutée (carte Lovelace, template, automation)
 - [x] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58) — contenu corrigé et lien vers ROADMAP.md ajouté

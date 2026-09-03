@@ -1,4 +1,4 @@
-# 📚 Public Transports for Home Assistant
+# Public Transports for Home Assistant
 
 Dhrions
 Version 0.8.2, 03/09/2026
