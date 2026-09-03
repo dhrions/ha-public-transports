@@ -53,7 +53,7 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 - [x] Absence de section « 💻 Utilisation » attendue pour l'archétype applicatif (README.md) — ajoutée (carte Lovelace, template, automation)
 - [x] Section « 🚧 Hors périmètre actuel » duplique un item de ROADMAP.md sans lien vers celle-ci (README.md:138-140, ROADMAP.md:58) — contenu corrigé et lien vers ROADMAP.md ajouté
 - [x] Aucune structure Antora : `docs/antora.yml`, `docs/antora-playbook.yml`, pages `.adoc`, `nav.adoc` tous absents (dépôt) — créée (arbitrage tranché avec l'utilisateur : créer plutôt qu'assumer README-only), build Antora validé localement
-- [x] `.gitea/workflows/docs.yml` absent, donc pas de trigger cross-repo doc — ajouté (template standard, branche `master`) ; nécessite le secret `REPOS_META_DISPATCH_TOKEN` sur ce dépôt — à vérifier/poser côté Gitea
+- [x] `.gitea/workflows/docs.yml` absent, donc pas de trigger cross-repo doc — ajouté (template standard, branche `master`) ; secret `REPOS_META_DISPATCH_TOKEN` déjà posé côté Gitea
 - [x] `.repo-meta.json` minimal — `category`, `status`, `icon`, `description` absents (.repo-meta.json) — champs ajoutés (alignés sur `freebox-tools`)
 - [x] Divergence structurelle avec `freebox-tools` (même catégorie IoT & Hardware, lui a une doc Antora complète) — résorbée, structure alignée
 - [x] README, section « Hors périmètre » : « Intervalle de rafraîchissement configurable » est faux — implémenté depuis longtemps (README.md:140 vs README.md:83-93) ; ROADMAP.md:58 porte la même erreur (item non coché sous 🟢 Priorité basse alors que livré) — les deux corrigés
