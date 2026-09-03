@@ -59,6 +59,7 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 - [x] README, section « Hors périmètre » : « Intervalle de rafraîchissement configurable » est faux — implémenté depuis longtemps (README.md:140 vs README.md:83-93) ; ROADMAP.md:58 porte la même erreur (item non coché sous 🟢 Priorité basse alors que livré) — les deux corrigés
 - [x] Offset de temps de marche (v0.8.0/0.8.1) totalement absent du README — le sens de l'état du capteur n'est plus documenté (config_flow.py:1071-1105, sensor.py:130-144) — section ajoutée
 - [x] Sélection d'un sous-ensemble de lignes (multi-select) non répercutée dans le README, qui ne décrit que « une ligne ou toutes » (config_flow.py:653, README.md:48-50) — corrigé
+- [x] Exemples de template README/usage.adoc concaténant `{{ states(...) }} min` sans garde — affiche littéralement « unknown min » quand aucun passage n'est encore rattrapable (état `unknown`, comportement voulu, cf. sensor.py:140-144) (README.md:118-123, docs/modules/ROOT/pages/usage.adoc:47-53) — exemple de template avec garde `unknown`/`unavailable` ajouté aux deux
 
 ## Sécurité & CI
 
