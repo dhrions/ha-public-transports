@@ -121,6 +121,19 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
   bloquant, typing strict, `strings.json` complet). Ne pas soumettre à Core avant ce
   refactor — pas un point de process, un blocage technique dur.
 
+- [ ] **hassfest volontairement non bloquant** (`.github/workflows/hassfest.yaml`,
+  `continue-on-error: true` depuis le 2026-09-04). Deux constats hassfest sur ce dépôt :
+  le `CONFIG_SCHEMA` manquant est **corrigé** (`__init__.py`,
+  `cv.config_entry_only_config_schema`) ; reste l'erreur `CONFIG_FLOW` « Config flows need
+  to be defined in the file config_flow.py », structurelle et **assumée** — le config flow
+  est un sous-package `config_flow/` (modularisation voulue, cf. `♻️ refactor` du
+  2026-09-03), que le linter statique de hassfest ne reconnaît pas alors que HA le charge
+  sans problème à l'exécution. hassfest n'est **pas** le gardien de la voie HACS par défaut
+  (c'est `hacs/action` + brands), donc cet échec ne bloque pas la distribution visée.
+  **Condition de réactivation** (retirer `continue-on-error`) : uniquement le jour où la
+  voie Core est réellement engagée — ce qui suppose de toute façon de revenir à un
+  `config_flow.py` unique ET de lever le blocage async ci-dessus.
+
 ## Tests
 
 - [x] `resolve_line_label`/`resolve_line_names` : chemin d'erreur HTTP jamais testé (config_flow.py:178-215, tests/test_config_flow.py:21-22) — 3 tests ajoutés (404, ClientError, succès)
