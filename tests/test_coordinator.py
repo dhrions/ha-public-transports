@@ -31,7 +31,9 @@ from custom_components.public_transports.coordinator import (
     entry_stop_code_count,
     entry_walking_time,
     estimate_daily_calls,
+    normalize_destination,
     scalar,
+    spec_key,
     spec_stop_codes,
     spec_walking_time,
 )
@@ -156,6 +158,47 @@ def test_call_matches_rejects_wrong_direction():
 def test_call_matches_accepts_matching_line_and_direction():
     call = MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller")
     assert call_matches(call, line_filter="13", direction_filter="Aller") is True
+
+
+def test_call_matches_rejects_wrong_destination():
+    """A destination_filter that doesn't match this passage's terminus must reject —
+    the per-vehicle refinement finer than direction_filter."""
+    call = MonitoredCall(direction_ref="Aller", destination_name="Asnières-Gennevilliers")
+    assert call_matches(call, None, None, destination_filter="Saint-Denis Université") is False
+
+
+def test_call_matches_accepts_destination_ignoring_accents_and_case():
+    """destination_name is producer free text, not a stable code — the comparison must
+    tolerate accent/casing variants of the same real terminus."""
+    call = MonitoredCall(destination_name="Saint-Denis - Université")
+    assert call_matches(call, None, None, destination_filter="saint-denis - universite") is True
+
+
+def test_call_matches_no_destination_filter_accepts_anything():
+    call = MonitoredCall(destination_name="Asnières-Gennevilliers")
+    assert call_matches(call, None, None, destination_filter=None) is True
+
+
+def test_normalize_destination_folds_accents_case_and_whitespace():
+    assert normalize_destination("  Saint-Denis - Université  ") == "saint-denis - universite"
+    assert normalize_destination(None) == ""
+
+
+def test_spec_key_differs_on_destination_filter():
+    """The digest must depend on the destination filter, not only line/direction —
+    otherwise two per-terminus specs of the same sense would collide on unique_id."""
+    base = {"line_filter": "C01383", "direction_filter": "Aller"}
+    key_a = spec_key({**base, "destination_filter": "Asnières-Gennevilliers"})
+    key_b = spec_key({**base, "destination_filter": "Saint-Denis Université"})
+    key_aggregate = spec_key(base)
+    assert len({key_a, key_b, key_aggregate}) == 3
+
+
+def test_spec_key_is_stable_for_the_same_content():
+    """Same filter content must always hash to the same key — the whole point of deriving
+    unique_id from content rather than list position."""
+    spec = {"line_filter": "C01383", "direction_filter": "Aller", "destination_filter": "Nation"}
+    assert spec_key(spec) == spec_key(dict(spec))
 
 
 def test_call_is_reachable_rejects_departed_passage():

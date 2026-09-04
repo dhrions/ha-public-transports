@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import math
+import unicodedata
 from datetime import time, timedelta
 from urllib.parse import quote
 
@@ -45,6 +47,23 @@ def scalar(value):
     if isinstance(value, dict):
         return value.get("value")
     return value
+
+
+def spec_key(spec: dict) -> str:
+    """Short stable digest of a spec's own filter (line/direction/destination) — the
+    content-derived suffix of a sensor's unique_id.
+
+    Sensor unique_ids used to be purely positional (index in entry.data["senses"]):
+    editing the destination filter in Options can shrink/grow/reorder that list, which
+    silently reassigned an existing history to a different sensor (ex. unchecking one
+    terminus shifted every later spec's index down). Hashing the filter fields instead
+    ties a sensor's identity to WHAT it tracks, not WHERE it sits in the list, so
+    re-ordering or adding/removing sibling specs no longer moves anyone else's history.
+    Truncated to 8 hex chars: not a security digest, just enough to avoid collisions
+    across the handful of specs one entry ever has.
+    """
+    raw = "|".join(str(spec.get(field) or "") for field in ("line_filter", "direction_filter", "destination_filter"))
+    return hashlib.sha1(raw.encode()).hexdigest()[:8]
 
 
 def spec_stop_codes(spec: dict) -> list[str]:
@@ -228,16 +247,36 @@ def spec_walking_time(entry: ConfigEntry, spec: dict) -> int:
     return override if override is not None else entry_walking_time(entry)
 
 
-def call_matches(call: MonitoredCall, line_filter, direction_filter) -> bool:
-    """Whether a passage passes a spec's line/direction filter.
+def normalize_destination(name: str | None) -> str:
+    """Fold a destination_name to a diacritics/case-insensitive comparison key.
+
+    destination_name is free text set by the producer, not a stable code (unlike
+    direction_ref) — a same real terminus can vary in accents/casing across passages
+    ("Saint-Denis - Université" vs "St-Denis - Universite"). Comparing on this folded
+    form makes destination_filter tolerant to that instead of silently matching nothing.
+    """
+    if not name:
+        return ""
+    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return folded.strip().casefold()
+
+
+def call_matches(call: MonitoredCall, line_filter, direction_filter, destination_filter=None) -> bool:
+    """Whether a passage passes a spec's line/direction/destination filter.
 
     Line matches line_ref or published_line_name (dropdown value vs manual entry).
     Direction matches the SIRI DirectionRef (Aller/Retour) — the real 2-way sense, not the
     per-vehicle terminus (which a forked line like metro 13 multiplies).
+    Destination (optional, finer than direction) matches destination_name — the per-vehicle
+    terminus on a forked sense (ex. metro 13 nord: Asnières-Gennevilliers vs
+    Saint-Denis Université) — compared normalize_destination-folded so a producer's
+    accent/casing variants of the same real terminus still match.
     """
     if line_filter and line_filter not in (scalar(call.line_ref), scalar(call.published_line_name)):
         return False
     if direction_filter and scalar(call.direction_ref) != direction_filter:
+        return False
+    if destination_filter and normalize_destination(scalar(call.destination_name)) != normalize_destination(destination_filter):
         return False
     return True
 
