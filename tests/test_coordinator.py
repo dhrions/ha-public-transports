@@ -159,6 +159,29 @@ def test_build_entry_title_lists_every_line_of_a_multiline_entry():
     assert title == "Gaîté 13, 58, 59 · Paris - IDF Mobilités / RATP"
 
 
+def test_build_entry_title_appends_direction_when_entry_scoped_to_one_sense():
+    """Two entries on the same stop+line but split by sense collide on stop+line alone;
+    the shared direction_label (here the forked-line terminus join) must disambiguate."""
+    senses = [
+        {"line_name": "13", "direction_label": "Asnières / Saint-Denis"},
+        {"line_name": "13", "direction_label": "Asnières / Saint-Denis",
+         "destination_label": "Saint-Denis"},
+    ]
+    title = build_entry_title("Gaîté", senses, "Paris", "IDF Mobilités / RATP")
+    assert title == "Gaîté 13 → Asnières / Saint-Denis · Paris - IDF Mobilités / RATP"
+
+
+def test_build_entry_title_omits_direction_when_senses_differ():
+    """A « both senses » entry (one sensor per direction) must NOT pick one sense's label
+    for the whole entry — the direction stays on each sensor, so the title omits it."""
+    senses = [
+        {"line_name": "13", "direction_label": "Asnières / Saint-Denis"},
+        {"line_name": "13", "direction_label": "Châtillon Montrouge"},
+    ]
+    title = build_entry_title("Gaîté", senses, "Paris", "IDF Mobilités / RATP")
+    assert title == "Gaîté 13 · Paris - IDF Mobilités / RATP"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

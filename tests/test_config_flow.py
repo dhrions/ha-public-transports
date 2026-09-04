@@ -90,6 +90,11 @@ def _flow(hass=None):
     flow = PublicTransportsConfigFlow()
     if hass is not None:
         flow.hass = hass
+    # A real flow always resolves stop/city/company before _create_entry — seed them so
+    # entry-title building (build_entry_title) works on realistic values in every test.
+    flow.stop_name = "Homme de Fer"
+    flow.city = "Strasbourg"
+    flow.transit_company = "CTS"
     return flow
 
 

@@ -80,12 +80,18 @@ def build_entry_title(stop_name: str, senses: list[dict], city: str, transit_com
     """Human title for a config entry, precise enough to tell entries apart in the list
     without opening each one.
 
-    Leads with the stop (the real discriminant) plus the line(s) the entry covers, then
-    the city/operator kept from the original title. The line is read from the specs, NOT
-    from a transient flow attribute: one entry can fan out over several lines (« une ligne
-    par capteur »), so every distinct line is listed rather than a single arbitrary one.
-    The sense/terminus stays on the sensor name, not here — it varies between an entry's
-    1-2 sensors and so is not common to the entry.
+    Leads with the stop (the real discriminant) plus whatever narrower scope ALL the
+    entry's senses share, then the city/operator kept from the original title. Read from
+    the specs, NOT from a transient flow attribute: one entry can fan out over several
+    lines/senses.
+
+    - line(s): every distinct line the entry covers (a « une ligne par capteur » entry
+      spans several), rather than a single arbitrary one.
+    - direction: appended only when every sense shares one direction_label — i.e. the
+      entry is scoped to a single sense (ex. « 13 Retour »), so the sense IS common to the
+      entry and disambiguates two same-stop-same-line entries split by direction. On a
+      « both senses » entry the senses differ, the condition is false, and nothing is
+      added — the sense stays on each sensor's own name, where it belongs.
     """
     named = [spec["line_name"] for spec in senses if spec.get("line_name")]
     lines = list(dict.fromkeys(named))
@@ -93,6 +99,9 @@ def build_entry_title(stop_name: str, senses: list[dict], city: str, transit_com
         head = stop_with_line(stop_name, lines[0] if lines else None)
     else:
         head = f"{stop_name} {', '.join(lines)}"
+    directions = {spec.get("direction_label") for spec in senses}
+    if len(directions) == 1 and (direction := next(iter(directions))):
+        head += f" → {direction}"
     return f"{head} · {city} - {transit_company}"
 
 
