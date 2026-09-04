@@ -138,6 +138,15 @@ filtrer sur le sens :
 {{ state_attr('sensor.gaite_prochain_passage', 'next_times')[:3] | join(', ') }} min
 ```
 
+⚠️ L'état vaut `unknown` quand aucun passage n'est encore rattrapable (temps de marche
+configuré, cf. section précédente) — un template qui concatène `{{ states(...) }} min` sans
+garde affiche alors littéralement « unknown min ». Distinguer ce cas dans le template :
+
+```yaml
+{% set etat = states('sensor.gaite_prochain_passage') %}
+{{ (etat ~ ' min') if etat not in ['unknown', 'unavailable'] else 'Aucun passage rattrapable' }}
+```
+
 Une automation peut se déclencher sur l'état numérique, par exemple pour notifier quand il
 reste moins de 5 minutes pour partir :
 
