@@ -1,0 +1,9 @@
+# Faux positifs gitleaks — un fingerprint par ligne (cf. repos-meta/SECRET_SCANNING.md).
+#
+# QUOTA_KEY = "IDF Mobilités / RATP::/stop-monitoring?MonitoringRef=" (tests/test_sensor.py)
+# matche la règle "generic-api-key" (entropie de la chaîne), mais ce n'est pas un secret :
+# c'est la clé de partage du capteur quota entre entrées d'un même (transporteur, endpoint),
+# une donnée publique du réseau SIRI, jamais une clé/jeton. Détecté à chaque scan (historique
+# complet) depuis les 2 commits qui l'ont introduite/modifiée.
+7863cfd6b58436f44b427d8e104e82460c39bc3d:tests/test_sensor.py:generic-api-key:117
+8ef5b9445ac367f68ebde34c76417773d20ecaeb:tests/test_sensor.py:generic-api-key:107
