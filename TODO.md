@@ -72,24 +72,25 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 - [x] `config_flow.py` (1127 lignes / 4 responsabilités indépendantes) à scinder en sous-package (config_flow.py:1-1127) — scindé en config_flow/{helpers,flow,options_flow}.py, 134/134 tests toujours au vert
 - [x] Duplication exacte de `_coordinators` entre deux classes de sensor.py (sensor.py:212-214, 285-287) — factorisée dans `_QuotaRegistryEntity`
 
-- [ ] **Quota API + appels du jour rattachés à un arrêt arbitraire, à déplacer dans une
-  entrée dédiée** (cf. ROADMAP 🟠, « Architecture des entrées »). Aujourd'hui
-  `sensor.async_setup_entry` (sensor.py:49-55) crée `PublicTransportsQuotaSensor` et
-  `PublicTransportsCallsTodaySensor` **une seule fois par `quota_key((compagnie))`**, sur
-  la **première entrée montée** pour cette clé — attribution dépendante de l'ordre de setup,
-  invisible à l'utilisateur (observé le 2026-09-04 : les deux capteurs squattaient l'entrée
-  « Gaîté 13 Retour »). Faiblesse corollaire déjà documentée (`__init__.py:99-102`) : si
-  l'entrée propriétaire est déchargée et qu'aucune autre entrée partageant la clé ne se
-  recharge, son capteur quota reste `unavailable` jusqu'au prochain reload.
-  - **Cible** : pattern *hub* HA — une entrée « compte/service » par `(compagnie, token)`
-    portant le token et les capteurs quota ; les arrêts deviennent des entrées rattachées
-    (ou des *config subentries* HA) qui la référencent.
-  - **Coût / risques à cadrer avant de lancer** : refonte du config flow (token saisi une
-    fois au niveau hub, arrêt ajouté dessous, réutilisation silencieuse actuelle à revoir) ;
-    **migration** des entrées existantes (`async_migrate_entry`) ; **changement des
-    `unique_id`** des capteurs quota → risque d'orpheliner leur historique, à traiter
-    explicitement. Non trivial : à concevoir comme un jalon à part, pas un correctif au fil
-    de l'eau.
+- [x] **Quota API + appels du jour rattachés à un arrêt arbitraire, à déplacer dans une
+  entrée dédiée** (cf. ROADMAP 🟠, « Architecture des entrées »). Résolu (2026-09-04) sans
+  la refonte hub+subentries envisagée initialement — l'`unique_id` de
+  `PublicTransportsQuotaSensor`/`CallsTodaySensor` (`quota_{key}`/`calls_today_{key}`) s'est
+  avéré déjà indépendant de l'entrée, donc aucun risque d'orpheliner leur historique en
+  déplaçant leur propriété.
+  - **Solution retenue** : une entrée « {compagnie} - Quota API » auto-provisionnée
+    (`QUOTA_HUB_KIND` dans `const.py`), jamais créée par l'utilisateur. Déclenchée par
+    `__init__._ensure_quota_hub` (fire-and-forget `hass.async_create_task`) au premier setup
+    d'une entrée-arrêt sans hub existant pour sa compagnie, via le mécanisme standard HA
+    `ConfigFlow.async_step_integration_discovery` + `async_set_unique_id` +
+    `_abort_if_unique_id_configured` (`config_flow/flow.py`) — ce dernier couple gère aussi
+    la course entre plusieurs entrées-arrêts démarrées en parallèle. Supprimée en cascade
+    par `__init__.async_remove_entry` quand la dernière entrée-arrêt d'une compagnie est
+    supprimée. `sensor.async_setup_entry` n'arbitre plus rien : le hub crée exactement les 2
+    capteurs diagnostiques, une entrée-arrêt exactement ses `PublicTransportsSensor`.
+  - **Non fait, écarté** : refonte hub+subentries des arrêts eux-mêmes (token saisi au
+    niveau hub, arrêts en sous-entrées) — bien plus lourd, changerait le config flow et le
+    stockage du token pour un bénéfice hors sujet ici (le problème n'était que le quota).
 
 ## Dépendances
 
