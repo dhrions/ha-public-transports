@@ -167,6 +167,128 @@ def test_build_name_plain_when_unfiltered():
     assert name == "Homme de Fer - prochain passage"
 
 
+def test_build_name_prefers_destination_label_over_direction_label():
+    """A per-terminus spec must show the terminus, not the sense's joined label (which
+    would just repeat every terminus of that sense, including this one)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    spec = {
+        "line_name": "13",
+        "direction_label": "Asnières-Gennevilliers / Saint-Denis Université",
+        "destination_label": "Saint-Denis Université",
+    }
+
+    name = PublicTransportsSensor._build_name(entry, spec)
+
+    assert name == "Homme de Fer 13 → Saint-Denis Université - prochain passage"
+
+
+def test_unique_id_index_zero_stays_legacy():
+    """index 0 must keep the plain entry-based id regardless of spec content, so an
+    existing single-sensor entry never orphans its history."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    sensor = PublicTransportsSensor(Mock(), entry, {"destination_filter": "Nation"}, 0)
+    assert sensor._attr_unique_id == f"{entry.entry_id}_next_passage"
+
+
+def test_unique_id_beyond_index_zero_is_derived_from_spec_content_not_position():
+    """Two specs with the same filter content must get the same unique_id regardless of
+    their index in entry.data["senses"] — editing Options can reshuffle that list."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    spec = {"line_filter": "C01383", "direction_filter": "Aller", "destination_filter": "Nation"}
+
+    sensor_at_1 = PublicTransportsSensor(Mock(), entry, spec, 1)
+    sensor_at_3 = PublicTransportsSensor(Mock(), entry, dict(spec), 3)
+
+    assert sensor_at_1._attr_unique_id == sensor_at_3._attr_unique_id != f"{entry.entry_id}_next_passage"
+
+
+def test_unique_id_differs_for_different_destination_filters():
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    spec_a = {"line_filter": "C01383", "direction_filter": "Aller", "destination_filter": "Asnières-Gennevilliers"}
+    spec_b = {"line_filter": "C01383", "direction_filter": "Aller", "destination_filter": "Saint-Denis Université"}
+
+    sensor_a = PublicTransportsSensor(Mock(), entry, spec_a, 1)
+    sensor_b = PublicTransportsSensor(Mock(), entry, spec_b, 1)
+
+    assert sensor_a._attr_unique_id != sensor_b._attr_unique_id
+
+
+async def test_sensor_destination_filter_narrows_calls_to_that_terminus(hass):
+    """A spec with a destination_filter must only surface passages to that terminus,
+    leaving the other branch of a forked sense out entirely."""
+    now = datetime.now(timezone.utc)
+
+    def at(minutes):
+        return (now + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    calls = [
+        MonitoredCall(
+            expected_arrival_time=at(5),
+            line_ref="A", direction_ref="Aller", destination_name="Asnières-Gennevilliers",
+        ),
+        MonitoredCall(
+            expected_arrival_time=at(10),
+            line_ref="A", direction_ref="Aller", destination_name="Saint-Denis Université",
+        ),
+    ]
+    entry = MockConfigEntry(domain=DOMAIN, data={
+        **ENTRY_DATA,
+        "senses": [{
+            "stop_code": ENTRY_DATA["stop_code"],
+            "line_filter": "A",
+            "direction_filter": "Aller",
+            "destination_filter": "Saint-Denis Université",
+            "destination_label": "Saint-Denis Université",
+        }],
+    })
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        return_value=calls,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.homme_de_fer_saint_denis_universite_prochain_passage")
+    assert state is not None
+    assert state.attributes["destination"] == "Saint-Denis Université"
+    next_times = state.attributes["next_times"]
+    assert len(next_times) == 1
+    assert 8 <= next_times[0] <= 11
+
+
+def test_sensor_logs_once_when_destination_filter_stops_matching(caplog):
+    """A destination_filter orphaned by the producer (renamed/dropped terminus) must warn
+    once, not spam every poll, and clear once a match reappears."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    spec = {
+        "line_filter": "A", "direction_filter": "Aller",
+        "destination_filter": "Nation", "destination_label": "Nation",
+    }
+    coordinator = Mock()
+    coordinator.data = [MonitoredCall(
+        line_ref="A", direction_ref="Aller", destination_name="Autre Terminus",
+        expected_arrival_time="2099-01-01T00:05:00+00:00",
+    )]
+    sensor = PublicTransportsSensor(coordinator, entry, spec, 1)
+
+    with caplog.at_level("WARNING"):
+        assert sensor._calls == []
+        assert sensor._calls == []  # second read must not log a second time
+
+    warnings = [r for r in caplog.records if "destination filter" in r.message]
+    assert len(warnings) == 1
+    assert sensor._destination_mismatch_logged is True
+
+    coordinator.data = [*coordinator.data, MonitoredCall(
+        line_ref="A", direction_ref="Aller", destination_name="Nation",
+        expected_arrival_time="2099-01-01T00:05:00+00:00",
+    )]
+    assert len(sensor._calls) == 1
+    assert sensor._destination_mismatch_logged is False
+
+
 QUOTA_KEY = "IDF Mobilités / RATP::/stop-monitoring?MonitoringRef="
 
 

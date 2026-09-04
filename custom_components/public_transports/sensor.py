@@ -20,6 +20,7 @@ from .coordinator import (
     entry_sense_specs,
     quota_key,
     scalar,
+    spec_key,
     spec_stop_codes,
     spec_walking_time,
 )
@@ -72,24 +73,35 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._spec = spec
-        # index 0 garde l'ancien unique_id historique pour ne pas orpheliner les entités
-        # déjà enregistrées ; les capteurs supplémentaires (2ᵉ sens) sont suffixés.
+        self._destination_mismatch_logged = False
+        # index 0 garde l'ancien unique_id historique pour ne pas orpheliner l'entité déjà
+        # enregistrée pour la config d'origine (un capteur unique, ou le premier sens d'une
+        # entrée créée avant ce suffixe). Les autres sont suffixés par spec_key, dérivé du
+        # contenu du filtre (ligne/sens/terminus) et non de sa position dans la liste : sans
+        # ça, éditer le filtre terminus dans les Options (qui peut faire varier le nombre de
+        # specs) réassignait silencieusement l'historique d'un capteur à un autre dès qu'un
+        # index se décalait.
         self._attr_unique_id = (
             f"{entry.entry_id}_next_passage" if index == 0
-            else f"{entry.entry_id}_next_passage_{index}"
+            else f"{entry.entry_id}_next_passage_{spec_key(spec)}"
         )
         self._attr_name = self._build_name(entry, spec)
 
     @staticmethod
     def _build_name(entry: ConfigEntry, spec: dict) -> str:
-        """Build a name that surfaces this sensor's line/direction, when set.
+        """Build a name that surfaces this sensor's line/direction/destination, when set.
 
-        Ex. "Gaîté 13 → Châtillon Montrouge - prochain passage" when filtered,
-        or "Gaîté - prochain passage" when tracking the whole stop.
+        Ex. "Gaîté 13 → Châtillon Montrouge - prochain passage" when filtered on a sense,
+        or "Gaîté - prochain passage" when tracking the whole stop. A destination_label
+        (finer than direction, when a sense forks into several terminuses) REPLACES the
+        direction label rather than appending to it — a direction label on a forked sense
+        is itself the join of those same terminuses (cf. _directions_from_calls), so
+        showing both would repeat the one terminus this sensor actually follows.
         """
         name = entry.data["stop_name"]
         line_name = spec.get("line_name")
-        direction = spec.get("direction_label")
+        destination = spec.get("destination_label")
+        direction = destination or spec.get("direction_label")
         if line_name:
             name += f" {line_name}"
         if direction:
@@ -112,11 +124,44 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         passage is the headline value changes.
         """
         raw = self.coordinator.data or []
-        return [
+        matches = [
             call for call in raw
-            if call_matches(call, self._spec.get("line_filter"), self._spec.get("direction_filter"))
+            if call_matches(
+                call,
+                self._spec.get("line_filter"),
+                self._spec.get("direction_filter"),
+                self._spec.get("destination_filter"),
+            )
             and call_is_reachable(call)
         ]
+        self._warn_if_destination_filter_stale(raw, matches)
+        return matches
+
+    def _warn_if_destination_filter_stale(self, raw: list[MonitoredCall], matches: list) -> None:
+        """Log once when a destination_filter stops matching anything, instead of the
+        sensor silently going `unknown` forever.
+
+        destination_name is producer free text (unlike direction_ref), so a terminus
+        renamed or dropped upstream leaves the filter orphaned with no error anywhere —
+        cf. normalize_destination's docstring for why the comparison is folded already.
+        Logs only on the transition (raw feed non-empty, no match, not already flagged) and
+        clears the flag once a match reappears, so a genuine quiet period (no service) or a
+        transient empty poll doesn't spam the log every refresh.
+        """
+        destination_filter = self._spec.get("destination_filter")
+        if not destination_filter:
+            return
+        if not matches and raw:
+            if not self._destination_mismatch_logged:
+                _LOGGER.warning(
+                    "%s: destination filter %r no longer matches any circulating passage "
+                    "(producer may have renamed/dropped this terminus) — sensor will stay "
+                    "unavailable until it does",
+                    self._attr_name, destination_filter,
+                )
+                self._destination_mismatch_logged = True
+        elif matches:
+            self._destination_mismatch_logged = False
 
     @property
     def _reachable_call(self) -> MonitoredCall | None:
