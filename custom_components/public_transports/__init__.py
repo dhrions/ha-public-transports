@@ -2,6 +2,7 @@ import logging
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, QUOTA_HUB_KIND
 from .coordinator import (
@@ -12,6 +13,10 @@ from .coordinator import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Cette intégration ne se configure QUE via config entries (UI), jamais par YAML — d'où
+# le schéma « config entry only » exigé par hassfest dès qu'async_setup est défini.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS = ["sensor"]
 
