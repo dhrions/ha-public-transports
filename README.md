@@ -1,7 +1,7 @@
 # Public Transports for Home Assistant
 
 Dhrions
-Version 0.10.0, 04/09/2026
+Version 0.11.0, 04/09/2026
 
 > Intégration custom Home Assistant (HACS) affichant les prochains passages de transport
 > en commun à un arrêt configuré, via [siri-lite](https://pypi.org/project/siri-lite/).
