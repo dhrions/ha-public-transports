@@ -65,6 +65,13 @@
           "direction": "Direction"
         }
       },
+      "select_destination": {
+        "title": "Destination (optional)",
+        "description": "This direction serves several destinations. Tick \"All destinations\" to keep an aggregate sensor, and/or one or more specific destinations to give each its own sensor — everything is ticked by default, at no extra API cost.",
+        "data": {
+          "destinations": "Destinations"
+        }
+      },
       "filters_manual": {
         "title": "Line filter (optional)",
         "description": "Nothing is currently running at this stop, so the list could not be offered. Leave empty to track everything, or type a line by hand (e.g. 13). The direction can be chosen later via the options once passages are visible.",
@@ -99,6 +106,13 @@
       "walking_advanced": {
         "title": "Offset per line / direction",
         "description": "Set a time to reach the stop for each line/direction — one platform or direction can be a few minutes closer or farther. Leave a field empty to inherit the entry default ({default_walking_time} min)."
+      },
+      "select_destination": {
+        "title": "Destination (optional)",
+        "description": "This direction serves several destinations. Tick \"All destinations\" to keep an aggregate sensor, and/or one or more specific destinations to give each its own sensor — everything is ticked by default, at no extra API cost.",
+        "data": {
+          "destinations": "Destinations"
+        }
       }
     },
     "error": {

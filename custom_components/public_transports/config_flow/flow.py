@@ -10,6 +10,7 @@ from homeassistant.core import callback
 
 from ..const import CITIES_DATA, DOMAIN, TRANSIT_COMPANIES
 from ..coordinator import scalar
+from .destinations import destination_options, destinations_from_calls, specs_from_destination_choice
 from .helpers import (
     BOTH_SENSES,
     ZDATYPE_LABELS,
@@ -53,6 +54,10 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.senses = []
         self.pole_codes = None
         self.pole_zones = []
+        # État en attente entre le sens retenu (async_step_select_direction) et son
+        # éventuel raffinement par terminus (async_step_select_destination).
+        self._pending_direction = None
+        self._destinations = {}
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step where the user inputs a city name."""
@@ -403,7 +408,10 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options[code] = " / ".join(terminuses) if terminuses else code
         return options
 
-    def _spec(self, stop_code=None, direction_filter=None, direction_label=None, stop_codes=None):
+    def _spec(
+        self, stop_code=None, direction_filter=None, direction_label=None, stop_codes=None,
+        destination_filter=None, destination_label=None,
+    ):
         """Build one sense spec (= one future sensor) from the current flow state.
 
         stop_code falls back to the single candidate when not given explicitly — needed
@@ -413,6 +421,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         stop_codes (pole mode only) additionally lists every physical code the sensor
         should merge — stop_code stays the primary/first one for display/back-compat.
+
+        destination_filter (async_step_select_destination only) further narrows one sense
+        to a single terminus, when that sense forks into several (ex. metro 13 nord).
         """
         stop_code = stop_code or (sorted(self.candidate_codes)[0] if self.candidate_codes else None)
         spec = {
@@ -424,6 +435,9 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
         if stop_codes:
             spec["stop_codes"] = stop_codes
+        if destination_filter:
+            spec["destination_filter"] = destination_filter
+            spec["destination_label"] = destination_label
         return spec
 
     async def async_step_select_direction(self, user_input=None):
@@ -465,8 +479,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if len(senses) <= 1:
             direction_filter, direction_label = next(iter(senses.items())) if senses else (None, None)
-            self.senses = [self._spec(self.stop_code, direction_filter, direction_label, self.pole_codes)]
-            return self._create_entry()
+            return await self._after_direction_chosen(direction_filter, direction_label)
 
         # Pas de "tous les sens" séparé : ça reviendrait au même que "les deux sens" (tout
         # suivre), juste avec un seul capteur fusionné au lieu de deux — redondant.
@@ -475,14 +488,62 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("direction")
             if choice == BOTH_SENSES:
+                # « Les deux sens » ne se raffine pas par terminus : ça multiplierait déjà
+                # 2 capteurs par le nombre de terminus de chaque sens sans qu'on ait posé
+                # la question — le raffinement par terminus reste réservé au cas où
+                # l'utilisateur a retenu un seul sens précis (cf. _after_direction_chosen).
                 self.senses = [self._spec(self.stop_code, d, label, self.pole_codes) for d, label in senses.items()]
-            else:
-                self.senses = [self._spec(self.stop_code, choice, senses.get(choice), self.pole_codes)]
-            return self._create_entry()
+                return self._create_entry()
+            return await self._after_direction_chosen(choice, senses.get(choice))
 
         return self.async_show_form(
             step_id="select_direction",
             data_schema=vol.Schema({vol.Required("direction", default=next(iter(senses))): dropdown(options)}),
+        )
+
+    async def _after_direction_chosen(self, direction_filter, direction_label):
+        """Route to the terminus-refinement step when the sense just resolved actually
+        forks into ≥2 terminuses, else create the entry directly for that single sense —
+        the same "skip the question when there is only one real choice" rule used
+        everywhere else in this flow.
+        """
+        self._destinations = destinations_from_calls(self.available_calls, self.line_filter, direction_filter)
+        if len(self._destinations) <= 1:
+            self.senses = [self._spec(self.stop_code, direction_filter, direction_label, self.pole_codes)]
+            return self._create_entry()
+        self._pending_direction = (direction_filter, direction_label)
+        return await self.async_step_select_destination()
+
+    async def async_step_select_destination(self, user_input=None):
+        """Let the user pick which terminus(es) to track for the sense just chosen.
+
+        Only reached when that sense forks into ≥2 terminuses (ex. metro 13 nord:
+        Asnières-Gennevilliers vs Saint-Denis Université — cf. _after_direction_chosen).
+        Multi-select, every option checked by default (the aggregate AND every terminus):
+        filtering here costs no extra API call (same shared raw feed), so opting in is
+        free and the user unchecks what they don't want rather than having to check
+        anything — ex. checking only "tous les terminus" + "Saint-Denis Université" gives
+        both "next metro regardless of branch" and "next one I can actually catch".
+        """
+        direction_filter, direction_label = self._pending_direction
+        options = destination_options(self._destinations)
+
+        if user_input is not None:
+            chosen = [key for key in (user_input.get("destinations") or []) if key in options]
+            self.senses = specs_from_destination_choice(
+                lambda dest_filter, dest_label: self._spec(
+                    self.stop_code, direction_filter, direction_label, self.pole_codes, dest_filter, dest_label
+                ),
+                self._destinations,
+                chosen,
+            )
+            return self._create_entry()
+
+        return self.async_show_form(
+            step_id="select_destination",
+            data_schema=vol.Schema({
+                vol.Required("destinations", default=list(options)): dropdown(options, multiple=True)
+            }),
         )
 
     async def async_step_filters_manual(self, user_input=None):

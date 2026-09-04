@@ -65,6 +65,13 @@
           "direction": "Sens"
         }
       },
+      "select_destination": {
+        "title": "Terminus (facultatif)",
+        "description": "Ce sens dessert plusieurs terminus. Cochez « Tous les terminus » pour garder un capteur agrégé, et/ou un ou plusieurs terminus précis pour leur dédier chacun un capteur — tout est coché par défaut, sans coût d'appel API supplémentaire.",
+        "data": {
+          "destinations": "Terminus"
+        }
+      },
       "filters_manual": {
         "title": "Filtre ligne (facultatif)",
         "description": "Aucun passage ne circule actuellement à cet arrêt : la liste n'a pas pu être proposée. Laissez vide pour tout suivre, ou saisissez à la main une ligne (ex. : 13). Le sens se choisira via les options une fois des passages visibles.",
@@ -99,6 +106,13 @@
       "walking_advanced": {
         "title": "Offset par ligne / sens",
         "description": "Réglez un temps pour rejoindre l'arrêt propre à chaque ligne/sens — une voie ou un sens peut être quelques minutes plus proche ou plus loin. Laissez un champ vide pour hériter du défaut de l'entrée ({default_walking_time} min)."
+      },
+      "select_destination": {
+        "title": "Terminus (facultatif)",
+        "description": "Ce sens dessert plusieurs terminus. Cochez « Tous les terminus » pour garder un capteur agrégé, et/ou un ou plusieurs terminus précis pour leur dédier chacun un capteur — tout est coché par défaut, sans coût d'appel API supplémentaire.",
+        "data": {
+          "destinations": "Terminus"
+        }
       }
     },
     "error": {

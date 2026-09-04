@@ -23,6 +23,7 @@ from ..coordinator import (
     entry_walking_time,
     estimate_daily_calls,
 )
+from .destinations import destination_options, destinations_from_calls, specs_from_destination_choice
 from .helpers import (
     ALL_DIRECTIONS,
     ALL_LINES,
@@ -57,6 +58,10 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
         # Options en attente entre l'étape init et l'étape avancée (offset par capteur) :
         # l'étape avancée les complète avec le walking_time propre à chaque spec.
         self._pending_options = None
+        # État en attente entre l'étape init et l'éventuel raffinement par terminus
+        # (async_step_select_destination), pour une entrée mono-sens dont le sens choisi
+        # forke en plusieurs terminus.
+        self._pending_destination = None
 
     @staticmethod
     def _format_count(value: int) -> str:
@@ -199,12 +204,47 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
                 else:
                     direction = user_input.get("direction")
                     direction_filter = None if not direction or direction == ALL_DIRECTIONS else direction
+                    direction_label = dir_options.get(direction) if direction_filter else None
+
+                    # Un sens mono-capteur peut lui-même forker en plusieurs terminus (ex.
+                    # métro 13 nord) — même raffinement optionnel qu'à la création (cf.
+                    # flow.py), proposé ici seulement quand ce fork existe réellement.
+                    # Une entrée déjà scindée par terminus (multi_sense, même line_filter
+                    # partout) repasse par la branche multi_sense ci-dessus à sa prochaine
+                    # ouverture des Options — chaque spec y garde son propre
+                    # destination_filter, seule la ligne reste éditable pour toutes à la fois.
+                    destinations = destinations_from_calls(calls, line_filter, direction_filter)
+                    if len(destinations) > 1:
+                        self._pending_destination = {
+                            "stop_code": primary.get("stop_code"),
+                            "stop_codes": primary.get("stop_codes"),
+                            "line_filter": line_filter,
+                            "line_name": line_name,
+                            "direction_filter": direction_filter,
+                            "direction_label": direction_label,
+                            "destinations": destinations,
+                            "options_data": {
+                                "scan_interval": scan_interval,
+                                "quiet_hours_start": quiet_start,
+                                "quiet_hours_end": quiet_end,
+                                "walking_time": walking_time,
+                            },
+                        }
+                        return await self.async_step_select_destination()
+
                     new_specs = [{
-                        **primary,
-                        "line_filter": line_filter,
-                        "line_name": line_name,
-                        "direction_filter": direction_filter,
-                        "direction_label": dir_options.get(direction) if direction_filter else None,
+                        k: v for k, v in {
+                            **primary,
+                            "line_filter": line_filter,
+                            "line_name": line_name,
+                            "direction_filter": direction_filter,
+                            "direction_label": direction_label,
+                        }.items()
+                        # Une entrée qui avait un destination_filter (le sens ne forke plus
+                        # au sondage courant, ex. service dégradé revenu à la normale)
+                        # retombe sur le capteur agrégé plutôt que de garder un filtre
+                        # devenu orphelin.
+                        if k not in ("destination_filter", "destination_label")
                     }]
 
             options_data = {
@@ -278,6 +318,46 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
             schema[vol.Optional("configure_per_sense", default=False)] = BooleanSelector()
         return vol.Schema(schema)
 
+    async def async_step_select_destination(self, user_input=None):
+        """Refine the single sense just chosen (async_step_init) by terminus, when it
+        forks into ≥2 — the Options-flow counterpart of flow.py's step of the same name.
+
+        Multi-select, every option checked by default (tout coché) — same rationale as
+        the initial config flow: filtering here costs no extra API call (same shared raw
+        feed), so the user unchecks what they don't want rather than having to opt in.
+        """
+        pending = self._pending_destination
+        destinations = pending["destinations"]
+        options = destination_options(destinations)
+
+        def spec_builder(destination_filter, destination_label):
+            spec = {
+                "stop_code": pending["stop_code"],
+                "line_filter": pending["line_filter"],
+                "line_name": pending["line_name"],
+                "direction_filter": pending["direction_filter"],
+                "direction_label": pending["direction_label"],
+            }
+            if pending.get("stop_codes"):
+                spec["stop_codes"] = pending["stop_codes"]
+            if destination_filter:
+                spec["destination_filter"] = destination_filter
+                spec["destination_label"] = destination_label
+            return spec
+
+        if user_input is not None:
+            chosen = [key for key in (user_input.get("destinations") or []) if key in options]
+            new_specs = specs_from_destination_choice(spec_builder, destinations, chosen)
+            options_data = {**pending["options_data"], "senses": new_specs}
+            return self.async_create_entry(title="", data=options_data)
+
+        return self.async_show_form(
+            step_id="select_destination",
+            data_schema=vol.Schema({
+                vol.Required("destinations", default=list(options)): dropdown(options, multiple=True)
+            }),
+        )
+
     async def async_step_walking_advanced(self, user_input=None):
         """Advanced step: a per-sensor (line × sense) walking-time override.
 
@@ -325,8 +405,9 @@ class PublicTransportsOptionsFlowHandler(config_entries.OptionsFlow):
             parts = []
             if spec.get("line_name"):
                 parts.append(str(spec["line_name"]))
-            if spec.get("direction_label"):
-                parts.append(f"→ {spec['direction_label']}")
+            destination_or_direction = spec.get("destination_label") or spec.get("direction_label")
+            if destination_or_direction:
+                parts.append(f"→ {destination_or_direction}")
             label = " ".join(parts) or f"Capteur {index + 1}"
             if label in seen:
                 seen[label] += 1

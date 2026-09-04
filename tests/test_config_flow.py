@@ -12,13 +12,17 @@ import aiohttp
 
 from custom_components.public_transports.config_flow import (
     ALL_LINES,
+    ALL_TERMINUSES,
     BOTH_SENSES,
     PublicTransportsConfigFlow,
     PublicTransportsOptionsFlowHandler,
     _directions_from_calls,
     _lines_from_calls,
+    destination_options,
+    destinations_from_calls,
     probe_available_passages,
     resolve_line_label,
+    specs_from_destination_choice,
 )
 from custom_components.public_transports.const import DOMAIN
 
@@ -64,6 +68,13 @@ CALLS_TWO_LINES_TWO_SENSES = [
     MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller", destination_name="Asnières"),
     MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Retour", destination_name="Châtillon Montrouge"),
     MonitoredCall(line_ref="C01384", published_line_name="6", direction_ref="Aller", destination_name="Nation"),
+]
+
+# Une ligne fourchue à un seul sens qui dessert deux terminus distincts (ex. métro 13
+# nord), pour exercer le raffinement par terminus (select_destination).
+CALLS_FORKED_DESTINATION = [
+    MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller", destination_name="Asnières-Gennevilliers"),
+    MonitoredCall(line_ref="C01383", published_line_name="13", direction_ref="Aller", destination_name="Saint-Denis Université"),
 ]
 
 # Trois lignes (une fourchue) pour exercer un vrai sous-ensemble strict au step ligne.
@@ -396,6 +407,115 @@ async def test_select_direction_single_sense_skips_form(hass):
     assert specs[0]["direction_filter"] == "Aller"
 
 
+def test_destinations_from_calls_dedupes_accent_and_case_variants():
+    """Two producer spellings of the same real terminus must collapse to one option."""
+    calls = [
+        MonitoredCall(line_ref="C01383", direction_ref="Aller", destination_name="Saint-Denis - Université"),
+        MonitoredCall(line_ref="C01383", direction_ref="Aller", destination_name="saint-denis - universite"),
+        MonitoredCall(line_ref="C01383", direction_ref="Aller", destination_name="Asnières-Gennevilliers"),
+    ]
+    destinations = destinations_from_calls(calls, "C01383", "Aller")
+    assert destinations == {
+        "Saint-Denis - Université": "Saint-Denis - Université",
+        "Asnières-Gennevilliers": "Asnières-Gennevilliers",
+    }
+
+
+def test_destinations_from_calls_filters_by_line_and_direction():
+    destinations = destinations_from_calls(CALLS_TWO_LINES_TWO_SENSES, "C01383", "Retour")
+    assert destinations == {"Châtillon Montrouge": "Châtillon Montrouge"}
+
+
+def test_specs_from_destination_choice_empty_selection_falls_back_to_aggregate():
+    specs = specs_from_destination_choice(lambda f, l: {"filter": f, "label": l}, {"Nation": "Nation"}, [])
+    assert specs == [{"filter": None, "label": None}]
+
+
+def test_specs_from_destination_choice_all_checked_builds_aggregate_plus_each_terminus():
+    destinations = {"Asnières-Gennevilliers": "Asnières-Gennevilliers", "Saint-Denis Université": "Saint-Denis Université"}
+    options = destination_options(destinations)
+    specs = specs_from_destination_choice(
+        lambda f, l: {"filter": f, "label": l}, destinations, list(options)
+    )
+    assert len(specs) == 3
+    assert {"filter": None, "label": None} in specs
+    assert {"filter": "Asnières-Gennevilliers", "label": "Asnières-Gennevilliers"} in specs
+    assert {"filter": "Saint-Denis Université", "label": "Saint-Denis Université"} in specs
+
+
+async def test_select_direction_single_sense_forked_destination_routes_to_select_destination(hass):
+    """A single (implicit) sense that still forks into ≥2 terminuses must ask which
+    terminus(es) to track, instead of creating the entry right away."""
+    flow = _flow(hass)
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+    flow.stop_code = "STIF:StopArea:SP:45102:"
+    flow.line_filter = "C01383"
+    flow.available_calls = CALLS_FORKED_DESTINATION
+
+    result = await flow.async_step_select_direction()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_destination"
+    destinations_key = next(k for k in result["data_schema"].schema if k == "destinations")
+    assert set(destinations_key.default()) == {
+        ALL_TERMINUSES, "Asnières-Gennevilliers", "Saint-Denis Université",
+    }
+
+
+async def test_select_destination_all_checked_creates_aggregate_and_per_terminus_specs(hass):
+    """The default (everything ticked) must yield 3 sensors: the aggregate plus one per
+    terminus — the actual feature ask."""
+    flow = _flow(hass)
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+    flow.stop_code = "STIF:StopArea:SP:45102:"
+    flow.line_filter = "C01383"
+    flow.available_calls = CALLS_FORKED_DESTINATION
+    await flow.async_step_select_direction()  # populates self._pending_direction/_destinations
+
+    result = await flow.async_step_select_destination({
+        "destinations": [ALL_TERMINUSES, "Asnières-Gennevilliers", "Saint-Denis Université"],
+    })
+
+    assert result["type"] == "create_entry"
+    specs = result["data"]["senses"]
+    assert len(specs) == 3
+    assert {s.get("destination_filter") for s in specs} == {None, "Asnières-Gennevilliers", "Saint-Denis Université"}
+    aggregate = next(s for s in specs if s.get("destination_filter") is None)
+    assert aggregate["line_filter"] == "C01383"
+    per_terminus = next(s for s in specs if s.get("destination_filter") == "Saint-Denis Université")
+    assert per_terminus["destination_label"] == "Saint-Denis Université"
+
+
+async def test_select_destination_unchecking_aggregate_keeps_only_chosen_termini(hass):
+    flow = _flow(hass)
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+    flow.stop_code = "STIF:StopArea:SP:45102:"
+    flow.line_filter = "C01383"
+    flow.available_calls = CALLS_FORKED_DESTINATION
+    await flow.async_step_select_direction()
+
+    result = await flow.async_step_select_destination({"destinations": ["Saint-Denis Université"]})
+
+    specs = result["data"]["senses"]
+    assert len(specs) == 1
+    assert specs[0]["destination_filter"] == "Saint-Denis Université"
+
+
+async def test_select_direction_both_senses_does_not_offer_destination_refinement(hass):
+    """"Les deux sens" must not layer a destination step on top — it already fans out to
+    2 sensors, and the destination refinement is scoped to a single retained sense."""
+    flow = _flow(hass)
+    flow.candidate_codes = ["STIF:StopArea:SP:45102:"]
+    flow.stop_code = "STIF:StopArea:SP:45102:"
+    flow.line_filter = "C01383"
+    flow.available_calls = CALLS_TWO_LINES_TWO_SENSES
+
+    result = await flow.async_step_select_direction({"direction": BOTH_SENSES})
+
+    assert result["type"] == "create_entry"
+    assert len(result["data"]["senses"]) == 2
+
+
 def test_reused_token_returns_existing_token_for_same_company(hass):
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -544,6 +664,80 @@ async def test_options_flow_accepts_projection_within_known_quota(hass):
 
     assert result["type"] == "create_entry"
     assert result["data"]["scan_interval"] == 60
+
+
+async def test_options_flow_single_sense_forked_destination_routes_to_select_destination(hass):
+    """Re-choosing a single sense that still forks into ≥2 terminuses must ask which to
+    track, mirroring the initial config flow's select_destination step."""
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
+        return_value=(CALLS_FORKED_DESTINATION, None),
+    ):
+        result = await flow.async_step_init({"line": "C01383", "direction": "Aller", "scan_interval": "60"})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_destination"
+    destinations_key = next(k for k in result["data_schema"].schema if k == "destinations")
+    assert set(destinations_key.default()) == {
+        ALL_TERMINUSES, "Asnières-Gennevilliers", "Saint-Denis Université",
+    }
+
+
+async def test_options_flow_select_destination_all_checked_builds_aggregate_and_per_terminus(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
+        return_value=(CALLS_FORKED_DESTINATION, None),
+    ):
+        await flow.async_step_init({"line": "C01383", "direction": "Aller", "scan_interval": "60"})
+        result = await flow.async_step_select_destination({
+            "destinations": [ALL_TERMINUSES, "Asnières-Gennevilliers", "Saint-Denis Université"],
+        })
+
+    assert result["type"] == "create_entry"
+    assert result["data"]["scan_interval"] == 60
+    specs = result["data"]["senses"]
+    assert len(specs) == 3
+    assert {s.get("destination_filter") for s in specs} == {None, "Asnières-Gennevilliers", "Saint-Denis Université"}
+    assert all(s["line_filter"] == "C01383" for s in specs)
+
+
+async def test_options_flow_select_destination_unchecking_aggregate_keeps_only_chosen(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=OPTIONS_ENTRY_DATA)
+    entry.add_to_hass(hass)
+    flow = _options_flow(hass, entry)
+
+    with patch(
+        "custom_components.public_transports.config_flow.options_flow.probe_available_passages",
+        return_value=(CALLS_FORKED_DESTINATION, None),
+    ):
+        await flow.async_step_init({"line": "C01383", "direction": "Aller", "scan_interval": "60"})
+        result = await flow.async_step_select_destination({"destinations": ["Saint-Denis Université"]})
+
+    specs = result["data"]["senses"]
+    assert len(specs) == 1
+    assert specs[0]["destination_filter"] == "Saint-Denis Université"
+
+
+def test_spec_labels_prefers_destination_label_over_direction_label():
+    """The advanced per-sensor walking-time step must label a per-terminus spec by its
+    terminus, not by the sense's (redundant, joined) direction label."""
+    specs = [{
+        "line_name": "13",
+        "direction_label": "Asnières-Gennevilliers / Saint-Denis Université",
+        "destination_label": "Saint-Denis Université",
+    }]
+
+    labels = PublicTransportsOptionsFlowHandler._spec_labels(specs)
+
+    assert labels == ["13 → Saint-Denis Université"]
 
 
 async def test_options_flow_accepts_custom_scan_interval_outside_preset_list(hass):
