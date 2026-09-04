@@ -35,6 +35,13 @@ Feuille de route de **public_transports for Home Assistant**
 - [x] **Accès direct aux horaires des prochains passages** sans parcourir une liste
   imbriquée d'objets
 
+### Architecture des entrées
+- [ ] **Loger le quota API et le compteur d'appels dans une entrée dédiée** plutôt que de
+  les rattacher à un arrêt arbitraire : ces capteurs mesurent une ressource partagée par
+  couple `(compagnie, token)`, pas un arrêt — les mettre dans une entrée « compte/service »
+  (pattern *hub* HA) supprimerait leur attribution dépendante de l'ordre de setup et la
+  fragilité de cycle de vie associée. Détail et pistes : `TODO.md` § Conception.
+
 ---
 
 ## 🟡 Priorité moyenne

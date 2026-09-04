@@ -72,6 +72,25 @@ La direction produit (*quoi atteindre*) vit dans `ROADMAP.md`.
 - [x] `config_flow.py` (1127 lignes / 4 responsabilités indépendantes) à scinder en sous-package (config_flow.py:1-1127) — scindé en config_flow/{helpers,flow,options_flow}.py, 134/134 tests toujours au vert
 - [x] Duplication exacte de `_coordinators` entre deux classes de sensor.py (sensor.py:212-214, 285-287) — factorisée dans `_QuotaRegistryEntity`
 
+- [ ] **Quota API + appels du jour rattachés à un arrêt arbitraire, à déplacer dans une
+  entrée dédiée** (cf. ROADMAP 🟠, « Architecture des entrées »). Aujourd'hui
+  `sensor.async_setup_entry` (sensor.py:49-55) crée `PublicTransportsQuotaSensor` et
+  `PublicTransportsCallsTodaySensor` **une seule fois par `quota_key((compagnie))`**, sur
+  la **première entrée montée** pour cette clé — attribution dépendante de l'ordre de setup,
+  invisible à l'utilisateur (observé le 2026-09-04 : les deux capteurs squattaient l'entrée
+  « Gaîté 13 Retour »). Faiblesse corollaire déjà documentée (`__init__.py:99-102`) : si
+  l'entrée propriétaire est déchargée et qu'aucune autre entrée partageant la clé ne se
+  recharge, son capteur quota reste `unavailable` jusqu'au prochain reload.
+  - **Cible** : pattern *hub* HA — une entrée « compte/service » par `(compagnie, token)`
+    portant le token et les capteurs quota ; les arrêts deviennent des entrées rattachées
+    (ou des *config subentries* HA) qui la référencent.
+  - **Coût / risques à cadrer avant de lancer** : refonte du config flow (token saisi une
+    fois au niveau hub, arrêt ajouté dessous, réutilisation silencieuse actuelle à revoir) ;
+    **migration** des entrées existantes (`async_migrate_entry`) ; **changement des
+    `unique_id`** des capteurs quota → risque d'orpheliner leur historique, à traiter
+    explicitement. Non trivial : à concevoir comme un jalon à part, pas un correctif au fil
+    de l'eau.
+
 ## Dépendances
 
 - [x] Pas de bornage sur `pytest`, `pytest-cov`, `pytest-homeassistant-custom-component` (requirements.test.txt:1-3) — planchers ajoutés
