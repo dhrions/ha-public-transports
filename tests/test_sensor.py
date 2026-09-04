@@ -11,6 +11,7 @@ from custom_components.public_transports.sensor import (
     PublicTransportsCallsTodaySensor,
     PublicTransportsQuotaSensor,
     PublicTransportsSensor,
+    async_setup_entry,
 )
 
 from .conftest import BASE_ENTRY_DATA
@@ -401,3 +402,31 @@ async def test_quota_sensor_entity_category_is_the_enum_not_a_string(hass):
     sensor = _quota_sensor(hass, [_fake_coordinator()])
 
     assert sensor.entity_category is EntityCategory.DIAGNOSTIC
+
+
+async def test_hub_entry_setup_adds_exactly_the_two_diagnostic_sensors(hass):
+    """A quota-hub entry's own async_setup_entry must add the quota + calls-today pair
+    and nothing else — it carries no stop, no PublicTransportsSensor to create."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"kind": "quota_hub", "transit_company": "IDF Mobilités / RATP"},
+    )
+    added = []
+
+    await async_setup_entry(hass, entry, added.extend)
+
+    assert len(added) == 2
+    assert {type(e) for e in added} == {PublicTransportsQuotaSensor, PublicTransportsCallsTodaySensor}
+
+
+async def test_stop_entry_setup_adds_no_diagnostic_sensor(hass):
+    """A regular stop entry's async_setup_entry must add only PublicTransportsSensor
+    entities — the quota/calls-today pair is the hub's exclusive responsibility now."""
+    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {("43A",): _fake_coordinator()}
+    added = []
+
+    await async_setup_entry(hass, entry, added.extend)
+
+    assert len(added) == 1
+    assert isinstance(added[0], PublicTransportsSensor)

@@ -3,7 +3,7 @@ import logging
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, QUOTA_HUB_KIND
 from .coordinator import (
     PublicTransportsDataUpdateCoordinator,
     entry_sense_specs,
@@ -85,21 +85,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
+    if entry.data.get("kind") != QUOTA_HUB_KIND:
+        _ensure_quota_hub(hass, entry.data["transit_company"])
+
     return True
+
+
+def _ensure_quota_hub(hass: HomeAssistant, transit_company: str) -> None:
+    """Provision the (company, endpoint) quota-hub entry if none exists yet.
+
+    Fire-and-forget (hass.async_create_task, never awaited here): triggering a config flow
+    from inside another entry's own setup must not block on it. Safe against several stop
+    entries of the same company starting up concurrently — async_step_integration_discovery
+    aborts every attempt past the first via async_set_unique_id/_abort_if_unique_id_configured,
+    so no lock is needed on this side.
+    """
+    existing = any(
+        e.data.get("kind") == QUOTA_HUB_KIND and e.data.get("transit_company") == transit_company
+        for e in hass.config_entries.async_entries(DOMAIN)
+    )
+    if existing:
+        return
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+            data={"transit_company": transit_company},
+        )
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
     """Unload a config entry.
 
     Also detaches this entry's coordinators from the shared quota registry (cf.
-    async_setup_entry) and drops the "who owns the quota entity for this key" marker if
-    this entry was the owner — sensor.py's async_setup_entry reads that marker to decide
-    whether to (re-)create the entity, so on this same entry's next setup (reload after an
-    options change, or the user re-adding it) the quota entity is recreated fresh rather
-    than silently missing. If a DIFFERENT entry still sharing the key never reloads
-    afterward, its quota sensor stays "unavailable" (HA keeps the entity registered, it
-    doesn't vanish) until something does reload it — a known, accepted limitation rather
-    than a hidden bug (see quota_key's docstring).
+    async_setup_entry). The quota/calls-today entities themselves live on a single,
+    dedicated hub entry per company (cf. QUOTA_HUB_KIND) — unlike the arbitrary
+    first-entry-wins ownership this replaced, there's no "who owns it" state to hand off
+    here anymore.
     """
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
@@ -109,9 +132,35 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
         for coordinator in entry_coordinators.values():
             if coordinator in shared:
                 shared.remove(coordinator)
-        owners = hass.data[DOMAIN].get("_quota_owner_entry", {})
-        if owners.get(key) == entry.entry_id:
-            owners.pop(key, None)
-            hass.data[DOMAIN].get("_quota_keys_with_entity", set()).discard(key)
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> None:
+    """Cascade-remove a company's quota hub once its last stop entry is deleted.
+
+    Called by HA while `entry` is still present in async_entries() (removed from the
+    registry only after this hook returns) — siblings must therefore explicitly exclude
+    entry.entry_id, not just filter by kind/company. A no-op for the hub entry itself: it
+    owns no other entry, nothing to cascade from its own removal.
+    """
+    if entry.data.get("kind") == QUOTA_HUB_KIND:
+        return
+    company = entry.data.get("transit_company")
+    siblings = [
+        e for e in hass.config_entries.async_entries(DOMAIN)
+        if e.entry_id != entry.entry_id
+        and e.data.get("kind") != QUOTA_HUB_KIND
+        and e.data.get("transit_company") == company
+    ]
+    if siblings:
+        return
+    hub = next(
+        (
+            e for e in hass.config_entries.async_entries(DOMAIN)
+            if e.data.get("kind") == QUOTA_HUB_KIND and e.data.get("transit_company") == company
+        ),
+        None,
+    )
+    if hub:
+        await hass.config_entries.async_remove(hub.entry_id)
 

@@ -9,6 +9,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from siri_lite.models import MonitoredCall, RateLimitInfo
 
 import aiohttp
+from homeassistant import config_entries
 
 from custom_components.public_transports.config_flow import (
     ALL_LINES,
@@ -25,6 +26,7 @@ from custom_components.public_transports.config_flow import (
     specs_from_destination_choice,
 )
 from custom_components.public_transports.const import DOMAIN
+from custom_components.public_transports.coordinator import quota_key
 
 
 class _FakeResponse:
@@ -1108,3 +1110,37 @@ async def test_resolve_line_label_returns_the_resolved_name_on_success(hass):
         result = await resolve_line_label(hass, "STIF:Line::C01383:")
 
     assert result == "13 (Metro)"
+
+
+async def test_integration_discovery_creates_the_quota_hub(hass):
+    """Auto-provisioning entry point (__init__._ensure_quota_hub) for a company with no
+    hub yet: creates it, never shows a form."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data={"transit_company": "IDF Mobilités / RATP"},
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["title"] == "IDF Mobilités / RATP - Quota API"
+    assert result["data"] == {"kind": "quota_hub", "transit_company": "IDF Mobilités / RATP"}
+
+
+async def test_integration_discovery_aborts_if_hub_already_exists(hass):
+    """A second discovery for the same company must abort — collapses the race between
+    several stop entries starting up concurrently, cf. _ensure_quota_hub's docstring."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=quota_key("IDF Mobilités / RATP"),
+        data={"kind": "quota_hub", "transit_company": "IDF Mobilités / RATP"},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_INTEGRATION_DISCOVERY},
+        data={"transit_company": "IDF Mobilités / RATP"},
+    )
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "already_configured"

@@ -2,6 +2,11 @@ from datetime import timedelta
 
 DOMAIN = "public_transports"
 
+# Marqueur de l'entrée auto-provisionnée (jamais créée par l'utilisateur) qui héberge le
+# quota API/appels du jour d'une compagnie — cf. __init__.async_setup_entry et
+# config_flow/flow.py async_step_integration_discovery.
+QUOTA_HUB_KIND = "quota_hub"
+
 # Le quota de l'API est compté par token, pas par intégration : un même token peut être
 # partagé par plusieurs instances HA et par d'autres clients (extension GNOME, scripts).
 # Un coordinateur émet un appel PAR code d'arrêt et par cycle, donc une entrée « pôle »

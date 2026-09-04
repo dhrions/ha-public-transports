@@ -8,8 +8,8 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from ..const import CITIES_DATA, DOMAIN, TRANSIT_COMPANIES
-from ..coordinator import build_entry_title, scalar
+from ..const import CITIES_DATA, DOMAIN, QUOTA_HUB_KIND, TRANSIT_COMPANIES
+from ..coordinator import build_entry_title, quota_key, scalar
 from .destinations import destination_options, destinations_from_calls, specs_from_destination_choice
 from .helpers import (
     BOTH_SENSES,
@@ -58,6 +58,23 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # éventuel raffinement par terminus (async_step_select_destination).
         self._pending_direction = None
         self._destinations = {}
+
+    async def async_step_integration_discovery(self, discovery_info):
+        """Auto-provision the quota-hub entry for one company (never user-initiated).
+
+        Triggered from __init__.async_setup_entry the first time a stop entry sets up for
+        a company with no hub yet. Never shows a form: creates the hub, or aborts silently
+        if one already exists for this company — async_set_unique_id +
+        _abort_if_unique_id_configured also collapses the race of several stop entries
+        starting up concurrently and each trying to provision the same hub.
+        """
+        company = discovery_info["transit_company"]
+        await self.async_set_unique_id(quota_key(company))
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(
+            title=f"{company} - Quota API",
+            data={"kind": QUOTA_HUB_KIND, "transit_company": company},
+        )
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step where the user inputs a city name."""

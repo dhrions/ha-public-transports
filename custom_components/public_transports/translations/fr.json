@@ -86,6 +86,9 @@
       "invalid_stop": "L'arrêt sélectionné est invalide.",
       "no_stops_found": "Aucun arrêt de bus trouvé pour cette compagnie.",
       "no_search_results": "Aucun arrêt trouvé pour cette recherche."
+    },
+    "abort": {
+      "already_configured": "Déjà configuré"
     }
   },
   "options": {

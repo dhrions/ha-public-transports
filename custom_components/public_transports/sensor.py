@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from siri_lite.models import MonitoredCall
 
-from .const import DOMAIN
+from .const import DOMAIN, QUOTA_HUB_KIND
 from .coordinator import (
     PublicTransportsDataUpdateCoordinator,
     call_is_reachable,
@@ -32,27 +32,27 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up one sensor per sense spec of the entry (two for a "both senses" entry).
+    """Set up this entry's sensors.
 
-    Also creates the quota sensor for this entry's (company, endpoint) — but only the
-    first time that key is seen: several entries sharing one PRIM token would otherwise
-    each add a near-duplicate sensor reading the same producer-side counter. Tracked in
-    hass.data (not per-entry) since the quota is shared across entries, not owned by one.
+    A quota-hub entry (cf. QUOTA_HUB_KIND) is the sole, dedicated owner of the quota/calls-
+    today sensors for its (company, endpoint) — it carries no stop, so exactly those two
+    entities. A regular stop entry sets up one PublicTransportsSensor per sense spec (two
+    for a "both senses" entry) and nothing else.
     """
+    if entry.data.get("kind") == QUOTA_HUB_KIND:
+        key = quota_key(entry.data["transit_company"])
+        async_add_entities([
+            PublicTransportsQuotaSensor(hass, key, entry.data["transit_company"]),
+            PublicTransportsCallsTodaySensor(hass, key, entry.data["transit_company"]),
+        ])
+        return
+
     coordinators = hass.data[DOMAIN][entry.entry_id]
     entities = []
     for index, spec in enumerate(entry_sense_specs(entry)):
         coordinator = coordinators.get(tuple(spec_stop_codes(spec)))
         if coordinator is not None:
             entities.append(PublicTransportsSensor(coordinator, entry, spec, index))
-
-    key = quota_key(entry.data["transit_company"])
-    keys_with_entity = hass.data[DOMAIN].setdefault("_quota_keys_with_entity", set())
-    if coordinators and key not in keys_with_entity:
-        entities.append(PublicTransportsQuotaSensor(hass, key, entry.data["transit_company"]))
-        entities.append(PublicTransportsCallsTodaySensor(hass, key, entry.data["transit_company"]))
-        keys_with_entity.add(key)
-        hass.data[DOMAIN].setdefault("_quota_owner_entry", {})[key] = entry.entry_id
 
     async_add_entities(entities)
 

@@ -7,7 +7,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.public_transports import async_migrate_entry
 from custom_components.public_transports.const import DOMAIN
-from custom_components.public_transports.coordinator import quota_key
 
 from .conftest import BASE_ENTRY_DATA as ENTRY_DATA
 
@@ -118,13 +117,10 @@ async def test_two_entries_sharing_a_company_get_one_shared_quota_sensor(hass):
     assert len(_quota_states(hass)) == 1
 
 
-async def test_unloading_the_non_owning_sibling_keeps_the_shared_quota_sensor(hass):
-    """Removing the entry that did NOT create the quota sensor must not disturb it.
-
-    Which of the two entries ends up owning the shared entity depends on bootstrap
-    processing order, not on which variable is named _a/_b — so the owner is looked up
-    from the integration's own registry rather than assumed.
-    """
+async def test_unloading_either_stop_entry_keeps_the_shared_quota_sensor(hass):
+    """The quota sensor is now owned by a dedicated hub entry, never by a stop entry —
+    unloading a stop entry (either one, no "owner" distinction left to make) must not
+    disturb it."""
     entry_a = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_A)
     entry_b = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_B)
     entry_a.add_to_hass(hass)
@@ -137,22 +133,54 @@ async def test_unloading_the_non_owning_sibling_keeps_the_shared_quota_sensor(ha
         assert await hass.config_entries.async_setup(entry_a.entry_id)
         await hass.async_block_till_done()
 
-        key = quota_key("IDF Mobilités / RATP")
-        owner_id = hass.data[DOMAIN]["_quota_owner_entry"][key]
-        non_owner = entry_b if owner_id == entry_a.entry_id else entry_a
-
-        assert await hass.config_entries.async_unload(non_owner.entry_id)
+        assert await hass.config_entries.async_unload(entry_a.entry_id)
         await hass.async_block_till_done()
 
     assert len(_quota_states(hass)) == 1
 
 
-async def test_unloading_the_owner_removes_the_quota_sensor_until_something_reloads(hass):
-    """Documents the accepted limitation (cf. async_unload_entry docstring): removing the
-    OWNING entry turns the shared quota sensor unavailable even if a sibling entry is
-    still active, until some entry sharing the key reloads and reclaims ownership. HA
-    keeps the entity registered (state -> "unavailable") rather than deleting it outright.
-    """
+async def test_unloading_the_hub_itself_removes_the_quota_sensor(hass):
+    """The hub is the sole owner of the quota sensor: unloading IT (not a stop entry)
+    is what makes the sensor unavailable, unlike the old first-entry-wins ownership."""
+    entry_a = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_A)
+    entry_a.add_to_hass(hass)
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        return_value=[],
+    ):
+        assert await hass.config_entries.async_setup(entry_a.entry_id)
+        await hass.async_block_till_done()
+
+        hub = next(
+            e for e in hass.config_entries.async_entries(DOMAIN)
+            if e.data.get("kind") == "quota_hub"
+        )
+        assert await hass.config_entries.async_unload(hub.entry_id)
+        await hass.async_block_till_done()
+
+    states = _quota_states(hass)
+    assert len(states) == 1
+    assert states[0].state == "unavailable"
+
+
+async def test_hub_entry_creates_no_coordinator(hass):
+    """A quota-hub entry carries no stop: its own setup must create zero coordinators
+    (no API call of its own), only the two diagnostic sensors."""
+    hub = MockConfigEntry(
+        domain=DOMAIN,
+        data={"kind": "quota_hub", "transit_company": "IDF Mobilités / RATP"},
+    )
+    hub.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.data[DOMAIN][hub.entry_id] == {}
+
+
+async def test_second_stop_entry_of_the_same_company_does_not_duplicate_the_hub(hass):
+    """Two stop entries sharing a company must provision exactly one hub, not two."""
     entry_a = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_A)
     entry_b = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_B)
     entry_a.add_to_hass(hass)
@@ -165,16 +193,50 @@ async def test_unloading_the_owner_removes_the_quota_sensor_until_something_relo
         assert await hass.config_entries.async_setup(entry_a.entry_id)
         await hass.async_block_till_done()
 
-        key = quota_key("IDF Mobilités / RATP")
-        owner_id = hass.data[DOMAIN]["_quota_owner_entry"][key]
-        owner = entry_a if owner_id == entry_a.entry_id else entry_b
+    hubs = [e for e in hass.config_entries.async_entries(DOMAIN) if e.data.get("kind") == "quota_hub"]
+    assert len(hubs) == 1
 
-        assert await hass.config_entries.async_unload(owner.entry_id)
+
+async def test_removing_the_last_stop_entry_removes_its_hub(hass):
+    """Deleting the only stop entry of a company must cascade-remove its now-orphaned
+    quota hub (async_remove_entry)."""
+    entry = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_A)
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        return_value=[],
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    states = _quota_states(hass)
-    assert len(states) == 1
-    assert states[0].state == "unavailable"
+        assert await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
+
+    hubs = [e for e in hass.config_entries.async_entries(DOMAIN) if e.data.get("kind") == "quota_hub"]
+    assert hubs == []
+
+
+async def test_removing_one_of_several_stop_entries_keeps_the_hub(hass):
+    """Deleting one stop entry while a sibling still shares the company must leave the
+    hub in place."""
+    entry_a = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_A)
+    entry_b = MockConfigEntry(domain=DOMAIN, data=PRIM_ENTRY_B)
+    entry_a.add_to_hass(hass)
+    entry_b.add_to_hass(hass)
+
+    with patch(
+        "custom_components.public_transports.coordinator.SiriClient.fetch_next_calls",
+        return_value=[],
+    ):
+        assert await hass.config_entries.async_setup(entry_a.entry_id)
+        await hass.async_block_till_done()
+
+        assert await hass.config_entries.async_remove(entry_a.entry_id)
+        await hass.async_block_till_done()
+
+    hubs = [e for e in hass.config_entries.async_entries(DOMAIN) if e.data.get("kind") == "quota_hub"]
+    assert len(hubs) == 1
 
 
 async def test_migrate_entry_v1_drops_stale_direction_filter(hass):

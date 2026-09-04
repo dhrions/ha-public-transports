@@ -86,6 +86,9 @@
       "invalid_stop": "The selected stop is invalid.",
       "no_stops_found": "No stop found for this company.",
       "no_search_results": "No stop found for this search."
+    },
+    "abort": {
+      "already_configured": "Already configured"
     }
   },
   "options": {
