@@ -23,6 +23,7 @@ from custom_components.public_transports.const import (
 )
 from custom_components.public_transports.coordinator import (
     PublicTransportsDataUpdateCoordinator,
+    build_entry_title,
     build_siri_client,
     call_is_reachable,
     call_matches,
@@ -126,6 +127,36 @@ def test_spec_stop_codes_falls_back_to_legacy_single():
 
 def test_spec_stop_codes_empty_when_neither_present():
     assert spec_stop_codes({}) == []
+
+
+def test_build_entry_title_whole_stop_no_line():
+    """An entry tracking a whole stop (no line filter) leads with the bare stop name."""
+    title = build_entry_title("Gaîté", [{"line_name": None}], "Paris", "IDF Mobilités / RATP")
+    assert title == "Gaîté · Paris - IDF Mobilités / RATP"
+
+
+def test_build_entry_title_single_line_appended():
+    """A single-line entry surfaces that line, so two entries on the same stop differ."""
+    senses = [
+        {"line_name": "13", "direction_filter": "Aller"},
+        {"line_name": "13", "direction_filter": "Retour"},
+    ]
+    title = build_entry_title("Gaîté", senses, "Paris", "IDF Mobilités / RATP")
+    assert title == "Gaîté 13 · Paris - IDF Mobilités / RATP"
+
+
+def test_build_entry_title_lists_every_line_of_a_multiline_entry():
+    """« Une ligne par capteur » fans one entry over several lines: the title must list
+    them all (deduped, first-seen order), never a single arbitrary one — the last line
+    iterated by the flow must not silently stand in for the whole entry."""
+    senses = [
+        {"line_name": "13"},
+        {"line_name": "58"},
+        {"line_name": "13"},
+        {"line_name": "59"},
+    ]
+    title = build_entry_title("Gaîté", senses, "Paris", "IDF Mobilités / RATP")
+    assert title == "Gaîté 13, 58, 59 · Paris - IDF Mobilités / RATP"
 
 
 @pytest.mark.parametrize(

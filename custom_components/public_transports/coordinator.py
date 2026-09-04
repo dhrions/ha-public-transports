@@ -66,6 +66,36 @@ def spec_key(spec: dict) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()[:8]
 
 
+def stop_with_line(stop_name: str, line_name: str | None) -> str:
+    """Stop name, suffixed with the line when filtered down to one.
+
+    Shared root of a sensor's friendly name (sensor.py) and its config entry's title
+    (build_entry_title) so the two never drift: a stop tracked whole reads "Gaîté", one
+    filtered to a line reads "Gaîté 13".
+    """
+    return f"{stop_name} {line_name}" if line_name else stop_name
+
+
+def build_entry_title(stop_name: str, senses: list[dict], city: str, transit_company: str) -> str:
+    """Human title for a config entry, precise enough to tell entries apart in the list
+    without opening each one.
+
+    Leads with the stop (the real discriminant) plus the line(s) the entry covers, then
+    the city/operator kept from the original title. The line is read from the specs, NOT
+    from a transient flow attribute: one entry can fan out over several lines (« une ligne
+    par capteur »), so every distinct line is listed rather than a single arbitrary one.
+    The sense/terminus stays on the sensor name, not here — it varies between an entry's
+    1-2 sensors and so is not common to the entry.
+    """
+    named = [spec["line_name"] for spec in senses if spec.get("line_name")]
+    lines = list(dict.fromkeys(named))
+    if len(lines) <= 1:
+        head = stop_with_line(stop_name, lines[0] if lines else None)
+    else:
+        head = f"{stop_name} {', '.join(lines)}"
+    return f"{head} · {city} - {transit_company}"
+
+
 def spec_stop_codes(spec: dict) -> list[str]:
     """Return the physical stop codes a spec reads from, single or pole.
 

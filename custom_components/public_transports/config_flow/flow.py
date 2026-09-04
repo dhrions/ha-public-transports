@@ -9,7 +9,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 
 from ..const import CITIES_DATA, DOMAIN, TRANSIT_COMPANIES
-from ..coordinator import scalar
+from ..coordinator import build_entry_title, scalar
 from .destinations import destination_options, destinations_from_calls, specs_from_destination_choice
 from .helpers import (
     BOTH_SENSES,
@@ -570,7 +570,7 @@ class PublicTransportsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _create_entry(self):
         """Create the config entry from the accumulated sense specs (1 or 2 sensors)."""
         return self.async_create_entry(
-            title=f"{self.city} - {self.transit_company}",
+            title=build_entry_title(self.stop_name, self.senses, self.city, self.transit_company),
             data={
                 "city": self.city,
                 "transit_company": self.transit_company,

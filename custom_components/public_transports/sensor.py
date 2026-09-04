@@ -23,6 +23,7 @@ from .coordinator import (
     spec_key,
     spec_stop_codes,
     spec_walking_time,
+    stop_with_line,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -98,12 +99,9 @@ class PublicTransportsSensor(CoordinatorEntity, SensorEntity):
         is itself the join of those same terminuses (cf. _directions_from_calls), so
         showing both would repeat the one terminus this sensor actually follows.
         """
-        name = entry.data["stop_name"]
-        line_name = spec.get("line_name")
+        name = stop_with_line(entry.data["stop_name"], spec.get("line_name"))
         destination = spec.get("destination_label")
         direction = destination or spec.get("direction_label")
-        if line_name:
-            name += f" {line_name}"
         if direction:
             name += f" → {direction}"
         return f"{name} - prochain passage"
