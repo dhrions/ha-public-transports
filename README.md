@@ -58,11 +58,25 @@ L'assistant de configuration guide en plusieurs étapes :
    sens (2 capteurs) » pour créer d'emblée un capteur par sens plutôt qu'un seul capteur
    non filtré. Le sens est déterminé par le `DirectionRef` SIRI, pas par le terminus : une
    ligne fourchue (ex. métro 13) a plusieurs terminus pour un même sens, tous regroupés.
+7. **Terminus** *(facultatif)* — n'apparaît que si le sens retenu à l'étape précédente
+   dessert lui-même plusieurs terminus (cas d'une ligne fourchue, ex. métro 13 nord :
+   Asnières-Gennevilliers *ou* Saint-Denis Université). Sélection multiple, **tout coché
+   par défaut** : « Tous les terminus (capteur unique) » (le comportement historique, un
+   passage sur deux n'étant pas le bon terminus n'est alors pas visible) *et* un capteur
+   par terminus coché individuellement — les deux peuvent coexister, ex. un capteur
+   « prochain métro 13, tous terminus confondus » à côté d'un capteur « prochain métro 13
+   vers Saint-Denis Université » seul. Décocher pour ne garder que le sous-ensemble voulu.
+   Aucun appel API supplémentaire : ce filtrage retraite le même flux déjà interrogé pour
+   le sens choisi.
 
-Le filtre ligne/sens est **modifiable après coup** sans supprimer l'arrêt : *Paramètres →
-Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*.
+Le filtre ligne/sens/terminus est **modifiable après coup** sans supprimer l'arrêt :
+*Paramètres → Appareils et services → Public Transports →* menu ⋮ de l'entrée *→ Options*
+— à une limite près : une entrée déjà scindée par terminus n'y réoffre pas le choix des
+terminus (seule la ligne y reste éditable pour tous les capteurs à la fois) ; réappliquer
+le choix des terminus depuis zéro suppose de retirer l'arrêt et de le reconfigurer.
 
-Une entrée de configuration = un arrêt suivi (éventuellement restreint à une ligne / un sens).
+Une entrée de configuration = un arrêt suivi (éventuellement restreint à une ligne / un
+sens / un terminus).
 
 ### 🚶 Temps pour rejoindre l'arrêt
 
@@ -95,11 +109,13 @@ Chaque arrêt configuré crée un capteur `sensor.<nom_arrêt>_prochain_passage`
 | `next_times` | Liste plate des minutes des prochains passages (ex. `next_times[1]` = passage suivant), pratique sur un dashboard/en template sans fouiller `next_passages` |
 | `next_passages` | Liste de tous les passages retournés : `{time, line, destination}` chacun — le terminus par passage y reste visible même quand le capteur est filtré sur un sens |
 
-Quand un filtre ligne et/ou sens est appliqué, le **nom du capteur** le reflète (ex.
-`Gaîté 13 → Châtillon Montrouge - prochain passage`), et l'état/la liste ne comptent que
-les passages du sens choisi. Sans filtre, le nom reste `<nom_arrêt> - prochain passage` et
-tous les passages sont pris en compte. Le terminus précis de chaque rame reste dans
-`next_passages`.
+Quand un filtre ligne et/ou sens et/ou terminus est appliqué, le **nom du capteur** le
+reflète (ex. `Gaîté 13 → Châtillon Montrouge - prochain passage`, ou `Gaîté 13 → Saint-Denis
+Université - prochain passage` pour un capteur filtré sur ce seul terminus), et l'état/la
+liste ne comptent que les passages retenus. Sans filtre, le nom reste
+`<nom_arrêt> - prochain passage` et tous les passages sont pris en compte. Le terminus
+précis de chaque rame reste dans `next_passages` — y compris sur un capteur filtré par
+terminus, qui ne liste alors que les passages vers celui-ci.
 
 ## 💻 Utilisation
 

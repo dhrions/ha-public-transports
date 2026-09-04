@@ -14,6 +14,9 @@ Feuille de route de **public_transports for Home Assistant**
   nom via le référentiel ouvert IDFM, faute de découverte SIRI native sur ce produit
 - [x] **Filtrage par sens réel de circulation** : un capteur dédié par sens (DirectionRef
   SIRI), y compris sur une ligne fourchue à plusieurs terminus par sens
+- [x] **Filtrage par terminus au sein d'un sens fourchu** : raffinement optionnel du sens
+  (métro 13 nord, RER…) par terminus précis, capteur agrégé et capteurs par terminus
+  cumulables, sans appel API supplémentaire — cf. README § Configuration, étape 7
 
 ---
 
