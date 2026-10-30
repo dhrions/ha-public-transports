@@ -7,16 +7,16 @@ Dhrions
 
 ## ⚡ TL;DR
 
-- 🚌 Configure un arrêt (ville, compagnie, arrêt) via l'UI Home Assistant et expose un
-  capteur : temps restant avant le prochain passage, ligne, destination.
-- 🎯 Réseaux supportés aujourd'hui : **CTS (Strasbourg/Schiltigheim)** et **IDF Mobilités /
-  RATP (Paris, via PRIM)**. L'API PRIM souscrite n'expose pas `stoppoints-discovery` ; la
-  découverte des arrêts pour Paris passe donc par le référentiel public IDFM
-  `zones-d-arrets` à la place. D'autres compagnies SIRI-lite peuvent être ajoutées dans
-  `const.py`.
-- 🚀 Installation : copier `custom_components/public_transports/` dans le dossier
-  `custom_components` de Home Assistant (ou via HACS), redémarrer, puis ajouter
-  l'intégration **Public Transports** depuis les paramètres.
+Crée dans Home Assistant un capteur par arrêt suivi, choisi dans l'assistant de configuration
+de l'UI : temps restant avant le prochain passage, en minutes, avec la ligne et la
+destination, lus en temps réel sur l'API SIRI-lite du réseau. Deux réseaux sont câblés
+aujourd'hui, CTS (Strasbourg/Schiltigheim) et IDF Mobilités / RATP (Paris, via PRIM) ;
+d'autres compagnies SIRI-lite s'ajoutent dans `const.py`.
+
+```bash
+# copier l'intégration, puis redémarrer Home Assistant et l'ajouter depuis les paramètres
+cp -r custom_components/public_transports/ <config>/custom_components/
+```
 
 ## 🚀 Installation
 
@@ -209,7 +209,9 @@ de la journée.
 Cette intégration s'appuie sur [`siri-lite`](https://pypi.org/project/siri-lite/)
 (`>=0.10.0`, publié sur PyPI) pour interroger l'API SIRI-lite *StopMonitoring* et récupérer
 les prochains passages. La découverte des arrêts (`stoppoints-discovery`, utilisée lors de
-la configuration) reste implémentée directement dans cette intégration.
+la configuration) reste implémentée directement dans cette intégration. Pour IDF
+Mobilités / RATP, l'API PRIM souscrite n'expose pas `stoppoints-discovery` : la découverte des
+arrêts de Paris passe par le référentiel public IDFM `zones-d-arrets` à la place.
 
 ## 🚧 Hors périmètre actuel
 
