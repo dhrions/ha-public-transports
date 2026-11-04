@@ -16,10 +16,9 @@ on:
     paths:
       - 'docs/**'
       - '.gitea/workflows/docs.yml'
-      # L'illustration du dépôt et ses métadonnées sont déployées par ce
-      # workflow : sans ces deux filtres, une régénération par imgforge ne
-      # déclencherait aucun run et la copie publiée resterait périmée.
-      - '.repo-meta.json'
+      # L'illustration du dépôt est déployée par ce workflow : sans ce
+      # filtre, une régénération par imgforge ne déclencherait aucun run et
+      # la copie publiée resterait périmée.
       - '*.png'
   workflow_dispatch:
 
@@ -119,19 +118,16 @@ jobs:
           echo "Deployment complete!"
           ls -la /deploy/dhrions/$REPO/
 
-      - name: Deploy project metadata and icon
+      - name: Deploy project icon
         run: |
-          # Copy .repo-meta.json if it exists at the repo root
-          if [ -f ".repo-meta.json" ]; then
-            cp .repo-meta.json /deploy/dhrions/$REPO/.repo-meta.json
-            echo "Deployed .repo-meta.json"
-
-            # Extract image field and copy the icon if specified
-            ICON=$(node -e "try{const m=JSON.parse(require('fs').readFileSync('.repo-meta.json','utf8'));if(m.image)console.log(m.image)}catch(e){}")
-            if [ -n "$ICON" ] && [ -f "$ICON" ]; then
-              cp "$ICON" /deploy/dhrions/$REPO/"$ICON"
-              echo "Deployed icon: $ICON"
-            fi
+          # imgforge names the illustration after the repository, and the
+          # repos-meta index generator looks for exactly that file in the
+          # deploy directory (<REPO>/<repository name>.png, REPO may differ
+          # from the repository name). No metadata file is read or deployed.
+          ICON="${GITHUB_REPOSITORY##*/}.png"
+          if [ -f "$ICON" ]; then
+            cp "$ICON" /deploy/dhrions/$REPO/"$ICON"
+            echo "Deployed icon: $ICON"
           fi
 
       - name: Trigger repos-meta index regeneration
