@@ -20,7 +20,7 @@ Le dépôt s'appuie sur quatre workflows Gitea Actions (`.gitea/workflows/`).
   `requirements` assemblé à la volée (`jq` sur `manifest.json` + `requirements.test.txt`).
 
 | `docs.yml`
-| Build Antora et déploiement sur push `master` touchant `docs/**`, `.repo-meta.json` ou
+| Build Antora et déploiement sur push `master` touchant `docs/**` ou
   l'illustration du dépôt.
 |===
 
@@ -48,6 +48,5 @@ transitive commune ne doit pas geler ce dépôt à elle seule.
 == Documentation (`docs.yml`)
 
 Construit la documentation Antora et la déploie sur le serveur de doc du parc, puis
-déclenche la régénération de l'index `repos-meta`. Se déclenche aussi sur un changement de
-`.repo-meta.json` ou de l'illustration du dépôt, pour que la copie déployée ne diverge pas
+déclenche la régénération de l'index `repos-meta`. Se déclenche aussi sur un changement de l'illustration du dépôt (`*.png`), pour que la copie déployée ne diverge pas
 de la source.
